@@ -108,14 +108,15 @@ class ResultsPanel(QWidget):
         component_names: list[str] | None = None,
     ):
         """Populate the results view with fit output."""
-        self._placeholder.setVisible(False)
-
-        # Table
         n = len(concentrations)
         if n == 0:
+            self._table.setRowCount(0)
+            self._placeholder.setVisible(True)
             return
+        self._placeholder.setVisible(False)
+
         self._table.setRowCount(n)
-        c_min = min(concentrations) if concentrations else 1.0
+        c_min = min(concentrations)
         if c_min == 0:
             c_min = 1.0
         for i, c in enumerate(concentrations):

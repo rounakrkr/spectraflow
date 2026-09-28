@@ -14,6 +14,8 @@ from PySide6.QtGui import QFont
 class SpectrumViewer(QWidget):
     """Fast, interactive NMR spectrum plot widget."""
 
+    FG_TRACES = frozenset({"Experimental", "Mixture"})
+
     region_added = Signal(float, float)
     point_clicked = Signal(float, float)
 
@@ -22,6 +24,7 @@ class SpectrumViewer(QWidget):
         self._plots: dict[str, pg.PlotDataItem] = {}
         self._regions: list[pg.LinearRegionItem] = []
         self._show_coords = show_coords
+        self._fg = "#e4e8ee"
         self._build_ui()
 
     # ── Build ───────────────────────────────────────────────
@@ -82,6 +85,8 @@ class SpectrumViewer(QWidget):
         if name in self._plots:
             self._plots[name].setData(ppm, data)
         else:
+            if name in self.FG_TRACES:
+                color = self._fg
             pen = pg.mkPen(color=color, width=width)
             item = self._pw.plot(ppm, data, pen=pen, name=name)
             self._plots[name] = item
@@ -139,6 +144,7 @@ class SpectrumViewer(QWidget):
         """Repaint plot background/axes/crosshair for current theme."""
         self._pw.setBackground(colors.get("plot_bg", "#141824"))
         fg = colors.get("plot_fg", "#e4e8ee")
+        self._fg = fg
         for axis_name in ("bottom", "left"):
             ax = self._pw.getAxis(axis_name)
             ax.setPen(pg.mkPen(fg))
@@ -147,6 +153,7 @@ class SpectrumViewer(QWidget):
         pen_ch = pg.mkPen(accent, width=1, style=Qt.PenStyle.DashLine)
         self._vline.setPen(pen_ch)
         self._hline.setPen(pen_ch)
-        # Recolor 'Experimental' trace to match foreground (invisible on wrong theme otherwise)
-        if "Experimental" in self._traces:
-            self._traces["Experimental"].setPen(pg.mkPen(fg, width=1.2))
+        for name in self.FG_TRACES:
+            item = self._plots.get(name)
+            if item is not None:
+                item.setPen(pg.mkPen(fg, width=1.2))

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
 
+from app import __version__
 from app.main_window import MainWindow
 
 
@@ -70,7 +71,7 @@ def main():
 
     # App metadata
     app.setApplicationName("SpectraFlow")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("SpectraFlow")
 
     # Create main window

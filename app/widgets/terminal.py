@@ -5,6 +5,8 @@ Read-only output area + single-line command input.
 
 import sys
 from datetime import datetime
+
+from app import __version__
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QLineEdit, QHBoxLayout, QLabel,
 )
@@ -56,7 +58,7 @@ class EmbeddedTerminal(QWidget):
         lay.addLayout(row)
 
         # Welcome message
-        self.write("SpectraFlow Terminal v1.0", "#4fc3f7")
+        self.write(f"SpectraFlow Terminal v{__version__}", "#4fc3f7")
         self.write(f"Session started at {datetime.now():%Y-%m-%d %H:%M:%S}", "#8892a0")
         self.write("Type 'help' for available commands.\n", "#8892a0")
 
