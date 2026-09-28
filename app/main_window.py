@@ -113,12 +113,26 @@ class MainWindow(QMainWindow):
         # Dashboard quick actions → navigate
         self._dashboard.action_requested.connect(self._navigate)
 
+    # Panel display names for status bar (#18)
+    _PANEL_NAMES = {
+        "home": "Dashboard",
+        "input": "Input Configuration",
+        "viewer": "Spectrum Viewer",
+        "regions": "Region Selector",
+        "calibration": "Calibration",
+        "peaks": "Peak Editor",
+        "fit": "Fit Runner",
+        "results": "Results",
+        "terminal": "Terminal",
+    }
+
     def _navigate(self, name: str):
         """Switch to the panel identified by *name*."""
         if name in self._panels:
             self._stack.setCurrentWidget(self._panels[name])
             self._sidebar.set_active(name)
-            self._status_label.setText(f"  {name.replace('_', ' ').title()}")
+            display = self._PANEL_NAMES.get(name, name.replace('_', ' ').title())
+            self._status_label.setText(f"  {display}")
 
     # ── Theme ───────────────────────────────────────────────
     def _toggle_theme(self):
@@ -170,7 +184,7 @@ class MainWindow(QMainWindow):
         command = parts[0].lower()
 
         if command == "help":
-            self._terminal.write("Available commands:", "#4fc3f7")
+            self._terminal.write("Available commands:", "#818cf8")
             self._terminal.write("  help          — show this help")
             self._terminal.write("  theme [dark|light] — switch theme")
             self._terminal.write("  goto <panel>  — navigate to a panel")
@@ -180,14 +194,16 @@ class MainWindow(QMainWindow):
             self._terminal.clear()
         elif command == "version":
             from app import __version__
-            self._terminal.write(f"SpectraFlow v{__version__}", "#4fc3f7")
+            self._terminal.write(f"SpectraFlow v{__version__}", "#818cf8")
         elif command == "theme":
             if len(parts) > 1 and parts[1] in ("dark", "light"):
                 app = QApplication.instance()
                 self._theme.apply_theme(app, parts[1])
-                self._sidebar.set_theme_label(parts[1] == "dark")
-                self._theme_indicator.setText(f"{'🌙 Dark' if parts[1] == 'dark' else '☀ Light'}")
+                is_dark = parts[1] == "dark"
+                self._sidebar.set_theme_label(is_dark)
+                self._theme_indicator.setText(f"{'🌙 Dark' if is_dark else '☀ Light'}")
                 self._update_plot_themes()
+                self._update_dwm_dark_mode(is_dark)  # Fix #15
                 self._terminal.write_success(f"Theme set to {parts[1]}")
             else:
                 self._terminal.write(f"Current: {self._theme.current_theme}")

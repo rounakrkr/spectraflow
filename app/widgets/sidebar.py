@@ -55,7 +55,8 @@ class Sidebar(QWidget):
         logo.setObjectName("sidebar_logo")
         h_lay.addWidget(logo)
 
-        ver = QLabel("v1.0.0 — NMR Mixture Analysis")
+        from app import __version__
+        ver = QLabel(f"v{__version__} — NMR Mixture Analysis")
         ver.setObjectName("sidebar_version")
         h_lay.addWidget(ver)
 

@@ -21,6 +21,7 @@ class PeakEditorPanel(QWidget):
         super().__init__(parent)
         self._peaks: list[dict] = []
         self._active = 0
+        self._drawn_peak_count = 0
         self._exp_ppm = None
         self._exp_data = None
         self._build_ui()
@@ -143,9 +144,13 @@ class PeakEditorPanel(QWidget):
         self._peaks.append({
             "u": center, "fwhm": 5.0, "k": 0.5, "b": 0.5, "phi": 0.0, "group": 0
         })
+        new_idx = len(self._peaks) - 1
         self._peak_spin.setMaximum(len(self._peaks))
         self._peak_count.setText(f"/ {len(self._peaks)}")
         self._peak_spin.setValue(len(self._peaks))
+        # Always sync sliders — setValue may not emit if already at same value
+        self._active = new_idx
+        self._load_peak(new_idx)
         self._redraw_all()
 
     def _remove_peak(self):
@@ -156,7 +161,9 @@ class PeakEditorPanel(QWidget):
         self._peak_spin.setMaximum(max(1, len(self._peaks)))
         self._peak_count.setText(f"/ {len(self._peaks)}")
         if self._peaks:
-            self._load_peak(min(idx, len(self._peaks) - 1))
+            new_idx = min(idx, len(self._peaks) - 1)
+            self._active = new_idx
+            self._load_peak(new_idx)
         self._redraw_all()
 
     def _on_peak_selected(self, val):
@@ -195,21 +202,28 @@ class PeakEditorPanel(QWidget):
     # ── Drawing ─────────────────────────────────────────────
     def _redraw_all(self):
         """Redraw all peaks as simple Lorentzian approximations for visual feedback."""
+        # Remove old peak traces to avoid orphans when peak count decreases
+        for i in range(self._drawn_peak_count):
+            self._viewer.remove_plot(f"Peak_{i+1}")
+        self._viewer.remove_plot("Total Fit")
+
         if self._exp_ppm is None:
+            self._drawn_peak_count = 0
             return
         ppm = self._exp_ppm
         total = np.zeros_like(ppm, dtype=float)
         colors = ["#ff7043", "#66bb6a", "#ab47bc", "#ffa726", "#26c6da",
                   "#ec407a", "#9ccc65", "#5c6bc0", "#8d6e63", "#78909c"]
         for i, p in enumerate(self._peaks):
-            # Simple Lorentzian for preview
+            # Simple Lorentzian for preview (approximate, not matching actual fit)
             gamma = p["fwhm"] / 100.0  # rough ppm conversion
             peak_data = p["k"] * gamma**2 / ((ppm - p["u"])**2 + gamma**2)
             total += peak_data
             c = colors[i % len(colors)]
             width = 2.0 if i == self._active else 0.8
             self._viewer.plot(ppm, peak_data, name=f"Peak_{i+1}", color=c, width=width)
-        self._viewer.plot(ppm, total, name="Total Fit", color="#4fc3f7", width=1.5)
+        self._viewer.plot(ppm, total, name="Total Fit", color="#818cf8", width=1.5)
+        self._drawn_peak_count = len(self._peaks)
 
     def _save(self):
         self.peaks_modified.emit(self._peaks)

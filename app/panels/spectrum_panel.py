@@ -113,7 +113,8 @@ class SpectrumPanel(QWidget):
             name = os.path.basename(path)
             self.add_spectrum(name, ppm, data)
         except Exception as e:
-            pass  # TODO: show error in status bar
+            import sys
+            print(f"[SpectraFlow] Error loading {path}: {e}", file=sys.stderr)
 
     def _load_demo(self):
         """Generate a synthetic NMR-like spectrum for demo / testing."""
@@ -131,14 +132,24 @@ class SpectrumPanel(QWidget):
 
     def add_spectrum(self, name: str, ppm: np.ndarray, data: np.ndarray):
         color = self._next_color()
+        # Handle duplicate names — replace existing trace
+        if name in self._spectra:
+            self._viewer.remove_plot(name)
+            # Remove old list item
+            for i in range(self._spec_list.count()):
+                if self._spec_list.item(i).data(Qt.ItemDataRole.UserRole) == name:
+                    self._spec_list.takeItem(i)
+                    break
         self._spectra[name] = {"ppm": ppm, "data": data, "color": color}
         self._viewer.plot(ppm, data, name=name, color=color)
-        self._spec_list.addItem(QListWidgetItem(f"● {name}"))
+        item = QListWidgetItem(f"● {name}")
+        item.setData(Qt.ItemDataRole.UserRole, name)
+        self._spec_list.addItem(item)
 
     def _remove_selected(self):
         for item in self._spec_list.selectedItems():
-            name = item.text().lstrip("● ")
-            if name in self._spectra:
+            name = item.data(Qt.ItemDataRole.UserRole)
+            if name and name in self._spectra:
                 self._viewer.remove_plot(name)
                 del self._spectra[name]
             self._spec_list.takeItem(self._spec_list.row(item))

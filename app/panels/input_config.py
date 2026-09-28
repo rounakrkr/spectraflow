@@ -195,9 +195,12 @@ class InputConfigPanel(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Select Components Folder")
         if folder:
             import os
+            # Only add known NMR / spectrum file types
+            valid_exts = {".fvf", ".ft", ".1r", ".fid", ".txt", ".csv", ".dat", ".dx", ".jdx"}
             for f in sorted(os.listdir(folder)):
                 full = os.path.join(folder, f)
-                if os.path.isfile(full) and full not in self._comp_paths:
+                _, ext = os.path.splitext(f)
+                if os.path.isfile(full) and ext.lower() in valid_exts and full not in self._comp_paths:
                     self._comp_paths.append(full)
                     self._comp_list.addItem(QListWidgetItem(full))
 
@@ -214,9 +217,10 @@ class InputConfigPanel(QWidget):
             # TODO: parse with pyihm.input_reading and populate fields
             pass
 
-    def _save_config(self):
+    def _build_config(self) -> dict:
+        """Build the full configuration dict — single source of truth."""
         methods = ["fast", "tight", "custom"]
-        config = {
+        return {
             "mix_path": self._mix_browser.get_path(),
             "comp_paths": list(self._comp_paths),
             "proc": {
@@ -234,14 +238,11 @@ class InputConfigPanel(QWidget):
             },
             "method": methods[self._method_group.checkedId()],
         }
+
+    def _save_config(self):
+        config = self._build_config()
         self.config_ready.emit(config)
 
     def get_config(self) -> dict:
         """Programmatic access to current configuration."""
-        self._save_config()  # triggers signal too
-        methods = ["fast", "tight", "custom"]
-        return {
-            "mix_path": self._mix_browser.get_path(),
-            "comp_paths": list(self._comp_paths),
-            "method": methods[self._method_group.checkedId()],
-        }
+        return self._build_config()

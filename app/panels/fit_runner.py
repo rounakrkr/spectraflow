@@ -135,6 +135,7 @@ class FitRunnerPanel(QWidget):
         self._progress.setVisible(True)
         self._status_label.setText("⏳ Running…")
         self._log.clear()
+        self._conv_data = {"x": [], "y": []}
         self._conv_viewer.clear()
         self._timer.start(1000)
         self.log("Fit started.")

@@ -112,8 +112,12 @@ class ResultsPanel(QWidget):
 
         # Table
         n = len(concentrations)
+        if n == 0:
+            return
         self._table.setRowCount(n)
-        c_min = min(concentrations) if concentrations else 1
+        c_min = min(concentrations) if concentrations else 1.0
+        if c_min == 0:
+            c_min = 1.0
         for i, c in enumerate(concentrations):
             name = component_names[i] if component_names else f"Component {i+1}"
             self._table.setItem(i, 0, QTableWidgetItem(name))

@@ -143,7 +143,10 @@ class SpectrumViewer(QWidget):
             ax = self._pw.getAxis(axis_name)
             ax.setPen(pg.mkPen(fg))
             ax.setTextPen(pg.mkPen(fg))
-        accent = colors.get("accent", "#4fc3f7")
+        accent = colors.get("accent", "#818cf8")
         pen_ch = pg.mkPen(accent, width=1, style=Qt.PenStyle.DashLine)
         self._vline.setPen(pen_ch)
         self._hline.setPen(pen_ch)
+        # Recolor 'Experimental' trace to match foreground (invisible on wrong theme otherwise)
+        if "Experimental" in self._traces:
+            self._traces["Experimental"].setPen(pg.mkPen(fg, width=1.2))

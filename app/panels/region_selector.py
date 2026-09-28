@@ -78,11 +78,13 @@ class RegionSelectorPanel(QWidget):
     # ── Actions ─────────────────────────────────────────────
     def _add_region(self):
         """Add a new draggable region to the plot."""
-        # Default span: center ±0.5 ppm (user drags to adjust)
         xlims = self._viewer.plot_widget.viewRange()[0]
+        # Guard: don't add regions on the default 0–1 empty view
+        if abs(xlims[1] - xlims[0]) < 0.01:
+            return
         center = (xlims[0] + xlims[1]) / 2
         half = (xlims[1] - xlims[0]) * 0.15
-        region = self._viewer.add_region(center - half, center + half, "#4fc3f740")
+        region = self._viewer.add_region(center - half, center + half, "#818cf840")
         region.sigRegionChangeFinished.connect(self._update_list)
         self._regions.append(region)
         self._update_list()

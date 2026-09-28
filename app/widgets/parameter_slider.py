@@ -43,16 +43,16 @@ class ParameterSlider(QWidget):
         # Label
         self._label = QLabel(label)
         self._label.setMinimumWidth(50)
-        self._label.setMaximumWidth(80)
+        self._label.setMaximumWidth(110)
         self._label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(self._label)
 
         # Slider
         self._slider = QSlider(Qt.Orientation.Horizontal)
-        self._slider.setMinimum(int(self._min * self._internal_scale))
-        self._slider.setMaximum(int(self._max * self._internal_scale))
-        self._slider.setSingleStep(int(self._step * self._internal_scale))
-        self._slider.setValue(int(default * self._internal_scale))
+        self._slider.setMinimum(round(self._min * self._internal_scale))
+        self._slider.setMaximum(round(self._max * self._internal_scale))
+        self._slider.setSingleStep(max(1, round(self._step * self._internal_scale)))
+        self._slider.setValue(round(default * self._internal_scale))
         self._slider.setMinimumWidth(80)
         self._slider.valueChanged.connect(self._slider_moved)
         lay.addWidget(self._slider, stretch=1)
@@ -88,7 +88,7 @@ class ParameterSlider(QWidget):
         if self._block:
             return
         self._block = True
-        self._slider.setValue(int(val * self._internal_scale))
+        self._slider.setValue(round(val * self._internal_scale))
         self.value_changed.emit(val)
         self._block = False
 
@@ -104,8 +104,8 @@ class ParameterSlider(QWidget):
     def set_range(self, min_val: float, max_val: float):
         self._min = min_val
         self._max = max_val
-        self._slider.setMinimum(int(min_val * self._internal_scale))
-        self._slider.setMaximum(int(max_val * self._internal_scale))
+        self._slider.setMinimum(round(min_val * self._internal_scale))
+        self._slider.setMaximum(round(max_val * self._internal_scale))
         self._spin.setRange(min_val, max_val)
 
     def set_label(self, text: str):
