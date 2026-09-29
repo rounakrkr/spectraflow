@@ -8,8 +8,34 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 
+from ..theme.theme_manager import COLORS
 from ..widgets.spectrum_viewer import SpectrumViewer
 from ..widgets.parameter_slider import ParameterSlider
+
+
+_LN2_4 = 4.0 * np.log(2.0)
+
+
+def pseudo_voigt(ppm: np.ndarray, u: float, fwhm_hz: float, sfo_mhz: float,
+                 beta: float, phi_deg: float = 0.0) -> np.ndarray:
+    """Preview line shape for one peak (pseudo-Voigt, area-agnostic).
+
+    ``fwhm_hz`` is the full width at half maximum in Hz, converted to ppm with
+    the spectrometer frequency ``sfo_mhz`` (Hz / MHz = ppm). ``beta`` is the
+    Gaussian fraction (0 = pure Lorentzian). Phase mixes in the dispersive
+    component, taken with the Lorentzian dispersion shape for both fractions.
+    This is a visual guide, not a reimplementation of the fitting model.
+    """
+    w = max(fwhm_hz / max(sfo_mhz, 1e-9), 1e-9)          # FWHM in ppm
+    x = (np.asarray(ppm, dtype=float) - u) / w
+    lorentz = 1.0 / (1.0 + 4.0 * x**2)
+    gauss = np.exp(-_LN2_4 * x**2)
+    absorptive = (1.0 - beta) * lorentz + beta * gauss
+    if phi_deg == 0.0:
+        return absorptive
+    dispersive = 2.0 * x * lorentz
+    phi = np.deg2rad(phi_deg)
+    return np.cos(phi) * absorptive + np.sin(phi) * dispersive
 
 
 class PeakEditorPanel(QWidget):
@@ -24,6 +50,7 @@ class PeakEditorPanel(QWidget):
         self._drawn_peak_count = 0
         self._exp_ppm = None
         self._exp_data = None
+        self._colors = COLORS["dark"]
         self._build_ui()
 
     def _build_ui(self):
@@ -101,6 +128,17 @@ class PeakEditorPanel(QWidget):
 
         rl.addWidget(card)
 
+        # Spectrometer frequency: needed to turn Hz linewidths into ppm for the preview
+        sfo_card = QFrame()
+        sfo_card.setObjectName("card")
+        sl_ = QVBoxLayout(sfo_card)
+        sl_.setContentsMargins(12, 12, 12, 12)
+        sl_.addWidget(QLabel("Spectrometer", objectName="section_title"))
+        self._sl_sfo = ParameterSlider("SFO1", 50.0, 1200.0, 400.0, 0.1, "MHz", 1)
+        self._sl_sfo.value_changed.connect(lambda _v: self._redraw_all())
+        sl_.addWidget(self._sl_sfo)
+        rl.addWidget(sfo_card)
+
         # Group selector
         grp_row = QHBoxLayout()
         grp_row.addWidget(QLabel("Group:"))
@@ -121,6 +159,10 @@ class PeakEditorPanel(QWidget):
         root.addWidget(splitter, stretch=1)
 
     # ── Data ────────────────────────────────────────────────
+    def set_spectrometer_frequency(self, sfo_mhz: float):
+        """Set the 1H Larmor frequency (MHz) used by the Hz→ppm preview conversion."""
+        self._sl_sfo.value = float(sfo_mhz)
+
     def set_experimental(self, ppm: np.ndarray, data: np.ndarray):
         self._exp_ppm = ppm
         self._exp_data = data
@@ -201,32 +243,37 @@ class PeakEditorPanel(QWidget):
 
     # ── Drawing ─────────────────────────────────────────────
     def _redraw_all(self):
-        """Redraw all peaks as simple Lorentzian approximations for visual feedback."""
-        # Remove old peak traces to avoid orphans when peak count decreases
-        for i in range(self._drawn_peak_count):
+        """Redraw the preview: one pseudo-Voigt trace per peak plus their sum.
+
+        Traces are updated in place; only traces beyond the current peak count
+        are removed. Colour/width changes (active peak highlight) are applied
+        by SpectrumViewer.plot().
+        """
+        for i in range(len(self._peaks), self._drawn_peak_count):
             self._viewer.remove_plot(f"Peak_{i+1}")
-        self._viewer.remove_plot("Total Fit")
 
         if self._exp_ppm is None:
+            self._viewer.remove_plot("Total Fit")
             self._drawn_peak_count = 0
             return
         ppm = self._exp_ppm
+        sfo = self._sl_sfo.value
         total = np.zeros_like(ppm, dtype=float)
-        colors = ["#ff7043", "#66bb6a", "#ab47bc", "#ffa726", "#26c6da",
-                  "#ec407a", "#9ccc65", "#5c6bc0", "#8d6e63", "#78909c"]
+        palette = ["#ff7043", "#66bb6a", "#ab47bc", "#ffa726", "#26c6da",
+                   "#ec407a", "#9ccc65", "#5c6bc0", "#8d6e63", "#78909c"]
         for i, p in enumerate(self._peaks):
-            # Simple Lorentzian for preview (approximate, not matching actual fit)
-            gamma = p["fwhm"] / 100.0  # rough ppm conversion
-            peak_data = p["k"] * gamma**2 / ((ppm - p["u"])**2 + gamma**2)
+            peak_data = p["k"] * pseudo_voigt(ppm, p["u"], p["fwhm"], sfo, p["b"], p["phi"])
             total += peak_data
-            c = colors[i % len(colors)]
             width = 2.0 if i == self._active else 0.8
-            self._viewer.plot(ppm, peak_data, name=f"Peak_{i+1}", color=c, width=width)
-        self._viewer.plot(ppm, total, name="Total Fit", color="#818cf8", width=1.5)
+            self._viewer.plot(ppm, peak_data, name=f"Peak_{i+1}",
+                              color=palette[i % len(palette)], width=width)
+        self._viewer.plot(ppm, total, name="Total Fit", color=self._colors["accent"], width=1.5)
         self._drawn_peak_count = len(self._peaks)
 
     def _save(self):
         self.peaks_modified.emit(self._peaks)
 
     def update_theme(self, colors: dict):
+        self._colors = colors
         self._viewer.update_theme(colors)
+        self._redraw_all()  # re-colour the Total Fit trace

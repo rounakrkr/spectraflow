@@ -39,7 +39,19 @@ class GradientBackground(QWidget):
         super().__init__(parent)
         self._theme = theme if theme in self.PALETTES else "dark"
         self._cache = QPixmap()
+        self._glass = False
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+
+    # Fraction of the gradient's opacity kept when a Mica/Acrylic backdrop is active,
+    # so the system material can show through the tint.
+    GLASS_OPACITY = 0.72
+
+    def set_glass(self, enabled: bool) -> None:
+        """Let a system backdrop (Mica/Acrylic) show through instead of painting opaque."""
+        if enabled != self._glass:
+            self._glass = enabled
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, not enabled)
+            self.update()
 
     @property
     def theme(self) -> str:
@@ -93,4 +105,9 @@ class GradientBackground(QWidget):
         if self._cache.isNull():
             return
         painter = QPainter(self)
+        if self._glass:
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.setOpacity(self.GLASS_OPACITY)
         painter.drawPixmap(0, 0, self._cache)

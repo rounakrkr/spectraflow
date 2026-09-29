@@ -5,7 +5,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QFileDialog, QListWidget,
-    QListWidgetItem, QCheckBox, QSplitter,
+    QListWidgetItem, QCheckBox, QSplitter, QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -18,6 +18,44 @@ TRACE_COLORS = [
     "#ffa726", "#26c6da", "#ec407a", "#9ccc65",
     "#5c6bc0", "#8d6e63",
 ]
+
+
+class SpectrumLoadError(ValueError):
+    """Raised when a text spectrum cannot be interpreted as (ppm, intensity)."""
+
+
+def load_text_spectrum(path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Read a two-column (ppm, intensity) text/CSV spectrum.
+
+    Whitespace-, comma-, semicolon- and tab-delimited files are accepted, as are
+    ``#`` comments and a single non-numeric header row. A one-column file is
+    rejected: it carries no chemical-shift axis and inventing one (point index)
+    would silently plot data against a meaningless ppm scale.
+    """
+    arr = None
+    last_err: Exception | None = None
+    for delim in (None, ",", ";", "\t"):
+        for skip in (0, 1):
+            try:
+                arr = np.loadtxt(path, delimiter=delim, comments="#", skiprows=skip, ndmin=2)
+                break
+            except ValueError as e:
+                last_err = e
+        if arr is not None:
+            break
+    if arr is None:
+        raise SpectrumLoadError(f"Could not parse numeric data ({last_err}).")
+    if arr.shape[1] < 2:
+        raise SpectrumLoadError(
+            "The file has a single column, so there is no chemical-shift axis. "
+            "Expected two columns: ppm and intensity."
+        )
+    ppm, data = arr[:, 0], arr[:, 1]
+    if ppm.size < 2:
+        raise SpectrumLoadError("The file contains fewer than two data points.")
+    if not (np.all(np.isfinite(ppm)) and np.all(np.isfinite(data))):
+        raise SpectrumLoadError("The file contains NaN or infinite values.")
+    return ppm, data
 
 
 class SpectrumPanel(QWidget):
@@ -103,18 +141,12 @@ class SpectrumPanel(QWidget):
         if not path:
             return
         try:
-            arr = np.loadtxt(path)
-            if arr.ndim == 1:
-                ppm = np.arange(len(arr))[::-1]
-                data = arr
-            else:
-                ppm = arr[:, 0]
-                data = arr[:, 1]
-            name = os.path.basename(path)
-            self.add_spectrum(name, ppm, data)
-        except Exception as e:
-            import sys
-            print(f"[SpectraFlow] Error loading {path}: {e}", file=sys.stderr)
+            ppm, data = load_text_spectrum(path)
+        except (SpectrumLoadError, OSError) as e:
+            QMessageBox.warning(self, "Could not load spectrum",
+                                f"{os.path.basename(path)}\n\n{e}")
+            return
+        self.add_spectrum(os.path.basename(path), ppm, data)
 
     def _load_demo(self):
         """Generate a synthetic NMR-like spectrum for demo / testing."""

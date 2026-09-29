@@ -34,6 +34,13 @@ def enable_windows_backdrop(window, dark: bool = True) -> bool:
         hwnd = int(window.winId())
         dwmapi = ctypes.windll.dwmapi
 
+        # ── Let the backdrop reach the client area (required for Mica/Acrylic) ──
+        class MARGINS(ctypes.Structure):
+            _fields_ = [("cxLeftWidth", c_int), ("cxRightWidth", c_int),
+                        ("cyTopHeight", c_int), ("cyBottomHeight", c_int)]
+        margins = MARGINS(-1, -1, -1, -1)
+        dwmapi.DwmExtendFrameIntoClientArea(hwnd, byref(margins))
+
         # ── Dark / light title bar ──────────────────────────
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         val = c_int(1 if dark else 0)
@@ -77,13 +84,19 @@ def main():
     # Create main window
     window = MainWindow()
 
+    # WA_TranslucentBackground must be set *before* the native handle is created;
+    # setting it afterwards leaves the window surface opaque. GradientBackground
+    # paints opaque unless a backdrop is actually active, so a failed DWM call
+    # still renders correctly.
+    if platform.system() == "Windows":
+        window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
     # Force native window handle creation (needed for DWM calls)
     window.winId()
 
     # Try enabling system glass effect
     has_glass = enable_windows_backdrop(window, dark=True)
-    if has_glass:
-        window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    window.set_glass(has_glass)
     window._has_glass = has_glass  # store for theme toggling
 
     window.showMaximized()

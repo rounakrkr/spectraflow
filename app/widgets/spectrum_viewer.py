@@ -22,6 +22,7 @@ class SpectrumViewer(QWidget):
     def __init__(self, parent=None, show_coords: bool = True):
         super().__init__(parent)
         self._plots: dict[str, pg.PlotDataItem] = {}
+        self._pens: dict[str, tuple[str, float]] = {}  # name -> (color, width) last applied
         self._regions: list[pg.LinearRegionItem] = []
         self._show_coords = show_coords
         self._fg = "#e4e8ee"
@@ -81,27 +82,32 @@ class SpectrumViewer(QWidget):
     def plot(self, ppm: np.ndarray, data: np.ndarray,
              name: str = "spectrum", color: str = "#4fc3f7",
              width: float = 1.5) -> pg.PlotDataItem:
-        """Add or update a named trace."""
+        """Add or update a named trace (data, colour and width)."""
+        if name in self.FG_TRACES:
+            color = self._fg
         if name in self._plots:
-            self._plots[name].setData(ppm, data)
+            item = self._plots[name]
+            item.setData(ppm, data)
+            if self._pens.get(name) != (color, width):
+                item.setPen(pg.mkPen(color=color, width=width))
         else:
-            if name in self.FG_TRACES:
-                color = self._fg
-            pen = pg.mkPen(color=color, width=width)
-            item = self._pw.plot(ppm, data, pen=pen, name=name)
+            item = self._pw.plot(ppm, data, pen=pg.mkPen(color=color, width=width), name=name)
             self._plots[name] = item
-        return self._plots[name]
+        self._pens[name] = (color, width)
+        return item
 
     def remove_plot(self, name: str):
         """Remove a named trace."""
         if name in self._plots:
             self._pw.removeItem(self._plots.pop(name))
+            self._pens.pop(name, None)
 
     def clear(self):
         """Remove all traces and regions, keep crosshair."""
         for item in self._plots.values():
             self._pw.removeItem(item)
         self._plots.clear()
+        self._pens.clear()
         for r in self._regions:
             self._pw.removeItem(r)
         self._regions.clear()
@@ -149,11 +155,13 @@ class SpectrumViewer(QWidget):
             ax = self._pw.getAxis(axis_name)
             ax.setPen(pg.mkPen(fg))
             ax.setTextPen(pg.mkPen(fg))
-        accent = colors.get("accent", "#818cf8")
+        accent = colors.get("accent", "#60a5fa")
         pen_ch = pg.mkPen(accent, width=1, style=Qt.PenStyle.DashLine)
         self._vline.setPen(pen_ch)
         self._hline.setPen(pen_ch)
         for name in self.FG_TRACES:
             item = self._plots.get(name)
             if item is not None:
-                item.setPen(pg.mkPen(fg, width=1.2))
+                width = self._pens.get(name, (fg, 1.2))[1]
+                item.setPen(pg.mkPen(fg, width=width))
+                self._pens[name] = (fg, width)

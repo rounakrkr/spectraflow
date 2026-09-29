@@ -23,6 +23,7 @@ class FitRunnerPanel(QWidget):
         super().__init__(parent)
         self._running = False
         self._start_time = 0
+        self._conv_data: dict[str, list] = {"x": [], "y": []}
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_elapsed)
         self._build_ui()
@@ -169,8 +170,6 @@ class FitRunnerPanel(QWidget):
         self._iter_label.setText(f"Iterations: {iteration}")
         self._target_label.setText(f"Target: {target:.5e}")
         # Append to convergence plot
-        if not hasattr(self, '_conv_data'):
-            self._conv_data = {"x": [], "y": []}
         self._conv_data["x"].append(iteration)
         self._conv_data["y"].append(np.log10(target) if target > 0 else -10)
         self._conv_viewer.plot(

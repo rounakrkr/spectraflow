@@ -116,14 +116,13 @@ class ResultsPanel(QWidget):
         self._placeholder.setVisible(False)
 
         self._table.setRowCount(n)
-        c_min = min(concentrations)
-        if c_min == 0:
-            c_min = 1.0
+        positives = [c for c in concentrations if c > 0]
+        c_min = min(positives) if positives else None  # zero must not rescale the ratios
         for i, c in enumerate(concentrations):
             name = component_names[i] if component_names else f"Component {i+1}"
             self._table.setItem(i, 0, QTableWidgetItem(name))
             self._table.setItem(i, 1, QTableWidgetItem(f"{c*100:.4f}"))
-            self._table.setItem(i, 2, QTableWidgetItem(f"{c/c_min:.4f}"))
+            self._table.setItem(i, 2, QTableWidgetItem(f"{c/c_min:.4f}" if c_min else "—"))
             self._table.setItem(i, 3, QTableWidgetItem("—"))
 
         # Spectrum plot
@@ -139,7 +138,9 @@ class ResultsPanel(QWidget):
 
         # Residuals
         residuals = experimental - total_fit
-        self._viewer.plot(ppm, residuals - 0.05 * np.ptp(total_fit),
+        floor = min(float(np.min(experimental)), float(np.min(total_fit)))
+        offset = floor - 1.2 * float(np.max(np.abs(residuals)))  # sit below the baseline, no overlap
+        self._viewer.plot(ppm, residuals + offset,
                          name="Residuals", color="#66bb6a", width=0.7)
 
         # Histogram

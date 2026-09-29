@@ -22,7 +22,8 @@ COMP_COLORS = [
 class CalibrationPanel(QWidget):
     """Calibrate chemical-shift drift and intensity of each component spectrum."""
 
-    calibration_done = Signal(dict)  # {comp_idx: {"drift": float, "intensity": float}}
+    # Signal(object), not Signal(dict): Qt's dict converter silently drops int-keyed dicts.
+    calibration_done = Signal(object)  # {comp_idx: {"drift": float, "intensity": float}}
 
     def __init__(self, parent=None):
         super().__init__(parent)

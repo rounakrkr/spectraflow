@@ -104,6 +104,10 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._terminal)
         return wrapper
 
+    def set_glass(self, enabled: bool):
+        """Tell the backdrop whether a system Mica/Acrylic material sits behind it."""
+        self._bg.set_glass(enabled)
+
     # ── Connections ─────────────────────────────────────────
     def _connect_signals(self):
         # Sidebar navigation
@@ -187,7 +191,7 @@ class MainWindow(QMainWindow):
         command = parts[0].lower()
 
         if command == "help":
-            self._terminal.write("Available commands:", "#818cf8")
+            self._terminal.write("Available commands:", self._theme.get_color("accent"))
             self._terminal.write("  help          — show this help")
             self._terminal.write("  theme [dark|light] — switch theme")
             self._terminal.write("  goto <panel>  — navigate to a panel")
@@ -197,7 +201,7 @@ class MainWindow(QMainWindow):
             self._terminal.clear()
         elif command == "version":
             from app import __version__
-            self._terminal.write(f"SpectraFlow v{__version__}", "#818cf8")
+            self._terminal.write(f"SpectraFlow v{__version__}", self._theme.get_color("accent"))
         elif command == "theme":
             if len(parts) > 1 and parts[1] in ("dark", "light"):
                 app = QApplication.instance()
@@ -212,8 +216,13 @@ class MainWindow(QMainWindow):
                 self._terminal.write(f"Current: {self._theme.current_theme}")
         elif command == "goto":
             if len(parts) > 1:
-                self._navigate(parts[1])
-                self._terminal.write_success(f"Navigated to {parts[1]}")
+                target = parts[1].lower()
+                if target in self._panels:
+                    self._navigate(target)
+                    self._terminal.write_success(f"Navigated to {target}")
+                else:
+                    self._terminal.write_error(f"Unknown panel: {parts[1]}")
+                    self._terminal.write(f"  Panels: {', '.join(self._panels.keys())}")
             else:
                 self._terminal.write("Usage: goto <panel_name>")
                 self._terminal.write(f"  Panels: {', '.join(self._panels.keys())}")

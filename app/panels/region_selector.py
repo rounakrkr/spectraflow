@@ -1,12 +1,14 @@
 """Region selector panel — draw and manage fit regions on the spectrum."""
 
 import numpy as np
+import pyqtgraph as pg
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QListWidget, QListWidgetItem,
 )
 from PySide6.QtCore import Signal, Qt
 
+from ..theme.theme_manager import COLORS
 from ..widgets.spectrum_viewer import SpectrumViewer
 
 
@@ -18,6 +20,7 @@ class RegionSelectorPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._regions: list = []  # list of LinearRegionItems
+        self._colors = COLORS["dark"]
         self._build_ui()
 
     def _build_ui(self):
@@ -34,6 +37,8 @@ class RegionSelectorPanel(QWidget):
 
         self._add_btn = QPushButton("+ Add Region")
         self._add_btn.setObjectName("primary_btn")
+        self._add_btn.setEnabled(False)
+        self._add_btn.setToolTip("Load a spectrum first")
         self._add_btn.clicked.connect(self._add_region)
         tb.addWidget(self._add_btn)
 
@@ -83,7 +88,7 @@ class RegionSelectorPanel(QWidget):
         xlims = self._viewer.plot_widget.viewRange()[0]
         center = (xlims[0] + xlims[1]) / 2
         half = (xlims[1] - xlims[0]) * 0.15
-        region = self._viewer.add_region(center - half, center + half, "#818cf840")
+        region = self._viewer.add_region(center - half, center + half, self._colors["plot_region"])
         region.sigRegionChangeFinished.connect(self._update_list)
         self._regions.append(region)
         self._update_list()
@@ -114,7 +119,12 @@ class RegionSelectorPanel(QWidget):
         return [(max(r.getRegion()), min(r.getRegion())) for r in self._regions]
 
     def set_spectrum(self, ppm: np.ndarray, data: np.ndarray, name: str = "Mixture"):
-        self._viewer.plot(ppm, data, name=name, color="#e4e8ee", width=1.2)
+        self._viewer.plot(ppm, data, name=name, color=self._colors["plot_fg"], width=1.2)
+        self._add_btn.setEnabled(True)
+        self._add_btn.setToolTip("")
 
     def update_theme(self, colors: dict):
+        self._colors = colors
         self._viewer.update_theme(colors)
+        for region in self._regions:
+            region.setBrush(pg.mkBrush(colors["plot_region"]))

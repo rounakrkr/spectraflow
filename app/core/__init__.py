@@ -1,3 +1,3 @@
 from .pipeline import Pipeline
-from .workers import FitWorker, SpectrumLoadWorker
+from .workers import FitWorker, FitCancelled, SpectrumLoadWorker
 from .batch_processor import BatchProcessor
