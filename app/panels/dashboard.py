@@ -1,47 +1,62 @@
-"""Dashboard — welcome screen with stats cards and quick actions."""
+"""Dashboard — welcome screen with stat cards and quick actions."""
 
 import sys
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QPushButton, QScrollArea, QSizePolicy,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
-from PySide6.QtCore import Signal, Qt
+
+from app.theme.theme_manager import COLORS
+from app.widgets.gradient_label import GradientLabel
 
 
 class _StatCard(QFrame):
-    """A small card showing a single statistic."""
+    """A centred card showing a single statistic."""
 
     def __init__(self, icon: str, value: str, label: str, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 16, 20, 16)
-        lay.setSpacing(4)
+        lay.setContentsMargins(20, 22, 20, 22)
+        lay.setSpacing(6)
 
-        top = QHBoxLayout()
         ic = QLabel(icon)
-        ic.setStyleSheet("font-size: 22px;")
-        top.addWidget(ic)
-        top.addStretch()
-        lay.addLayout(top)
+        ic.setStyleSheet("font-size: 26px;")
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(ic)
 
-        val = QLabel(value)
-        val.setObjectName("stat_value")
-        lay.addWidget(val)
+        self.value_label = GradientLabel(value)
+        self.value_label.setObjectName("stat_value")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.value_label)
 
-        lbl = QLabel(label)
+        lbl = QLabel(label.upper())
         lbl.setObjectName("stat_label")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(lbl)
+
+    def set_value(self, value: str) -> None:
+        self.value_label.setText(value)
 
 
 class DashboardPanel(QWidget):
     """Home screen with quick overview and action buttons."""
 
-    action_requested = Signal(str)  # "new_analysis", "open_input", "batch"
+    action_requested = Signal(str)  # "input", "viewer", "fit"
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._gradient_labels: list[GradientLabel] = []
         self._build_ui()
+        self.update_theme(COLORS["dark"])
+
+    def update_theme(self, colors: dict) -> None:
+        """Recolour gradient text to match the active theme palette."""
+        start = colors.get("grad_start", "#dbeafe")
+        end = colors.get("grad_end", "#60a5fa")
+        for label in self._gradient_labels:
+            label.set_colors(start, end)
 
     def _build_ui(self):
         scroll = QScrollArea()
@@ -51,12 +66,13 @@ class DashboardPanel(QWidget):
         content = QWidget()
         content.setObjectName("panel_content")
         root = QVBoxLayout(content)
-        root.setContentsMargins(32, 28, 32, 28)
-        root.setSpacing(24)
+        root.setContentsMargins(36, 32, 36, 32)
+        root.setSpacing(26)
 
         # ── Header ──────────────────────────────────────────
-        title = QLabel("Welcome to SpectraFlow")
+        title = GradientLabel("Welcome to SpectraFlow")
         title.setObjectName("heading")
+        self._gradient_labels.append(title)
         root.addWidget(title)
 
         subtitle = QLabel(
@@ -68,11 +84,16 @@ class DashboardPanel(QWidget):
 
         # ── Stat cards ──────────────────────────────────────
         cards_row = QHBoxLayout()
-        cards_row.setSpacing(16)
-        cards_row.addWidget(_StatCard("📂", "0", "Input Files Loaded"))
-        cards_row.addWidget(_StatCard("🧪", "0", "Components Ready"))
-        cards_row.addWidget(_StatCard("⚡", "—", "Last Fit Duration"))
-        cards_row.addWidget(_StatCard("📦", "0", "Batch Jobs Run"))
+        cards_row.setSpacing(18)
+        self._stat_cards = [
+            _StatCard("📂", "0", "Input Files Loaded"),
+            _StatCard("🧪", "0", "Components Ready"),
+            _StatCard("⚡", "—", "Last Fit Duration"),
+            _StatCard("📦", "0", "Batch Jobs Run"),
+        ]
+        for card in self._stat_cards:
+            self._gradient_labels.append(card.value_label)
+            cards_row.addWidget(card, 1)
         root.addLayout(cards_row)
 
         # ── Quick actions ───────────────────────────────────
@@ -81,7 +102,7 @@ class DashboardPanel(QWidget):
         root.addWidget(act_title)
 
         acts = QHBoxLayout()
-        acts.setSpacing(12)
+        acts.setSpacing(18)
 
         for name, icon, label, desc in [
             ("input", "📁", "New Analysis", "Configure input files and fit parameters"),
@@ -90,21 +111,26 @@ class DashboardPanel(QWidget):
         ]:
             card = QFrame()
             card.setObjectName("card")
-            card.setCursor(Qt.CursorShape.PointingHandCursor)
             cl = QVBoxLayout(card)
-            cl.setContentsMargins(20, 16, 20, 16)
-            cl.setSpacing(8)
-            cl.addWidget(QLabel(f"{icon}  {label}", objectName="section_title"))
+            cl.setContentsMargins(24, 20, 24, 20)
+            cl.setSpacing(10)
+
+            card_title = QLabel(f"{icon}  {label}")
+            card_title.setObjectName("card_title")
+            cl.addWidget(card_title)
+
             d = QLabel(desc)
             d.setObjectName("muted")
             d.setWordWrap(True)
-            cl.addWidget(d)
+            d.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            cl.addWidget(d, 1)
+
             btn = QPushButton(f"Open {label}")
             btn.setObjectName("action_btn")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _, n=name: self.action_requested.emit(n))
             cl.addWidget(btn)
-            acts.addWidget(card)
+            acts.addWidget(card, 1)
 
         root.addLayout(acts)
 
@@ -125,8 +151,8 @@ class DashboardPanel(QWidget):
         steps_card = QFrame()
         steps_card.setObjectName("card")
         sl = QVBoxLayout(steps_card)
-        sl.setContentsMargins(20, 16, 20, 16)
-        sl.setSpacing(6)
+        sl.setContentsMargins(24, 20, 24, 20)
+        sl.setSpacing(8)
         for s in steps:
             lbl = QLabel(s)
             lbl.setWordWrap(True)

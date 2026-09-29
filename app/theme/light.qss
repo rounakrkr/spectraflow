@@ -5,7 +5,7 @@
 
 /* ── Global ─────────────────────────────────────────────────── */
 QWidget {
-    background-color: #f8f9fc;
+    background-color: transparent;
     color: #1a1f2e;
     font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
@@ -19,8 +19,8 @@ QMainWindow {
 
 /* ── Sidebar ────────────────────────────────────────────────── */
 QWidget#sidebar {
-    background-color: rgba(240, 242, 245, 230);
-    border-right: 1px solid rgba(0, 0, 0, 0.06);
+    background-color: rgba(255, 255, 255, 0.55);
+    border-right: 1px solid rgba(30, 64, 175, 0.10);
 }
 
 QWidget#sidebar_header {
@@ -81,18 +81,20 @@ QLabel#sidebar_version {
 
 /* ── Cards & Panels ─────────────────────────────────────────── */
 QFrame#card {
-    background-color: rgba(255, 255, 255, 185);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 8px;
-    padding: 16px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 0.85),
+        stop:1 rgba(255, 255, 255, 0.55));
+    border: 1px solid rgba(30, 64, 175, 0.12);
+    border-radius: 18px;
+    padding: 0px;
 }
 
 QFrame#card:hover {
-    border-color: rgba(0, 0, 0, 0.12);
+    border-color: rgba(37, 99, 235, 0.35);
 }
 
 QWidget#panel_content {
-    background-color: rgba(248, 249, 252, 220);
+    background-color: transparent;
 }
 
 /* ── Labels ─────────────────────────────────────────────────── */
@@ -683,4 +685,37 @@ QMenu::separator {
     height: 1px;
     background-color: #dde1e6;
     margin: 4px 8px;
+}
+
+/* ── Dashboard cards ────────────────────────────────────────── */
+QPushButton#action_btn {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #3b82f6, stop:1 #2563eb);
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+QPushButton#action_btn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #60a5fa, stop:1 #3b82f6);
+}
+
+QLabel#card_title {
+    color: #1a1f2e;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+/* ── Containers that must stay readable over the gradient ───── */
+QDialog {
+    background-color: #f6f9ff;
+}
+
+QScrollArea {
+    background: transparent;
+    border: none;
 }

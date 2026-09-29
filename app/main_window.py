@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from .theme.theme_manager import ThemeManager, COLORS
+from .widgets.gradient_background import GradientBackground
 from .widgets.sidebar import Sidebar
 from .widgets.terminal import EmbeddedTerminal
 from .panels.dashboard import DashboardPanel
@@ -39,7 +40,8 @@ class MainWindow(QMainWindow):
 
     # ── Build ───────────────────────────────────────────────
     def _build_ui(self):
-        central = QWidget()
+        central = GradientBackground()
+        self._bg = central
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -109,6 +111,7 @@ class MainWindow(QMainWindow):
 
         # Theme toggle
         self._sidebar.theme_button.clicked.connect(self._toggle_theme)
+        self._theme.theme_changed.connect(self._bg.set_theme)
 
         # Dashboard quick actions → navigate
         self._dashboard.action_requested.connect(self._navigate)

@@ -33,6 +33,7 @@ class Sidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sidebar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(220)
         self._buttons: dict[str, QPushButton] = {}
         self._theme_btn: QPushButton | None = None
@@ -56,7 +57,7 @@ class Sidebar(QWidget):
         h_lay.addWidget(logo)
 
         from app import __version__
-        ver = QLabel(f"v{__version__} — NMR Mixture Analysis")
+        ver = QLabel(f"v{__version__}")
         ver.setObjectName("sidebar_version")
         h_lay.addWidget(ver)
 
