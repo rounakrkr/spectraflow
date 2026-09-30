@@ -15,7 +15,8 @@ from ..widgets.spectrum_viewer import SpectrumViewer
 class RegionSelectorPanel(QWidget):
     """Select spectral windows for fitting by drawing regions on the plot."""
 
-    regions_changed = Signal(list)  # list of (left, right) tuples
+    regions_changed = Signal(list)     # list of (left, right) tuples — emitted on every change
+    regions_confirmed = Signal(list)   # emitted when user clicks "Confirm Regions"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,6 +51,11 @@ class RegionSelectorPanel(QWidget):
         clear_btn = QPushButton("Clear All")
         clear_btn.clicked.connect(self._clear_all)
         tb.addWidget(clear_btn)
+
+        confirm_btn = QPushButton("✓ Confirm Regions")
+        confirm_btn.setObjectName("primary_btn")
+        confirm_btn.clicked.connect(lambda: self.regions_confirmed.emit(self.get_regions()))
+        tb.addWidget(confirm_btn)
 
         root.addLayout(tb)
 

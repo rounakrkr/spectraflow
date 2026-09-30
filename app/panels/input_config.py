@@ -15,7 +15,8 @@ from ..widgets.parameter_slider import ParameterSlider
 class InputConfigPanel(QWidget):
     """Configure input files, processing options, and fit parameters."""
 
-    config_ready = Signal(dict)  # Emitted with the complete config dict
+    config_ready = Signal(dict)          # Emitted with the complete config dict
+    input_file_loaded = Signal(str)      # Emitted with path to a pyihm .inp file
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,6 +38,21 @@ class InputConfigPanel(QWidget):
         title.setObjectName("heading")
         root.addWidget(title)
         root.addWidget(QLabel("Load your spectra, set processing options, and define fit boundaries.", objectName="muted"))
+
+        # ── Quick load: pyihm input file ────────────────────
+        inp_row = QHBoxLayout()
+        inp_btn = QPushButton("📄 Load pyihm Input File (.inp)")
+        inp_btn.setObjectName("primary_btn")
+        inp_btn.setToolTip("Load a traditional pyihm input text file — auto-fills all fields")
+        inp_btn.clicked.connect(self._load_input_file)
+        inp_row.addWidget(inp_btn)
+        inp_row.addStretch()
+        root.addLayout(inp_row)
+
+        sep = QLabel("— or configure manually below —")
+        sep.setObjectName("muted")
+        sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(sep)
 
         # ── Section 1: Mixture Spectrum ─────────────────────
         root.addWidget(self._section_header("1. Mixture Spectrum"))
@@ -246,3 +262,13 @@ class InputConfigPanel(QWidget):
     def get_config(self) -> dict:
         """Programmatic access to current configuration."""
         return self._build_config()
+
+    def _load_input_file(self):
+        """Open a pyihm input file (.inp / .txt) and emit its path."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load pyihm Input File",
+            "",
+            "pyihm Input (*.inp *.txt);;All Files (*)",
+        )
+        if path:
+            self.input_file_loaded.emit(path)

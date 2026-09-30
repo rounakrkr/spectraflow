@@ -17,7 +17,8 @@ class FitRunnerPanel(QWidget):
     """Run the IHM fit with live convergence monitoring."""
 
     fit_started = Signal()
-    fit_finished = Signal(object)  # result dict
+    fit_finished = Signal(object)      # result dict
+    fit_requested = Signal(str)        # method name — wired to engine.run_fit
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -141,6 +142,7 @@ class FitRunnerPanel(QWidget):
         self._timer.start(1000)
         self.log("Fit started.")
         self.fit_started.emit()
+        self.fit_requested.emit("tight")  # emit method to engine
 
     def _on_stop(self):
         self._running = False
