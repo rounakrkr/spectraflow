@@ -3,7 +3,6 @@ Embedded terminal / console widget.
 Read-only output area + single-line command input.
 """
 
-import sys
 from datetime import datetime
 
 from app import __version__

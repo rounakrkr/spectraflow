@@ -240,3 +240,45 @@ def test_gradient_background_glass_toggles_opacity(qapp):
     assert not g.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
     g.set_glass(False)
     assert g.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+
+
+# ── AnalysisEngine.run_fit ─────────────────────────────────────────
+def test_run_fit_does_not_raise_unboundlocalerror(qapp, monkeypatch):
+    """Regression: `param` was re-bound inside _do_fit (pre-alignment) without
+    `nonlocal`, so the very first read of it raised UnboundLocalError and every
+    fit failed. Drive run_fit end-to-end with a stubbed backend."""
+    import lmfit
+    from types import SimpleNamespace
+    from PySide6.QtCore import QEventLoop, QTimer
+    from app.core import engine as eng
+
+    n = 500
+    M = SimpleNamespace(acqus={"x": 1}, freq=400.0,
+                        r=np.ones(n), ppm=np.linspace(10, 0, n))
+    param = lmfit.Parameters()
+    param.add("I_1", value=1.0)
+
+    # Backend stubs: a single flat "spectrum" so the fit is trivially solvable.
+    monkeypatch.setattr(eng.pyihm_fit, "calc_spectra",
+                        lambda p, ns, acqus, N: [np.full(n, p["I_1"].value)])
+    monkeypatch.setattr(eng.pyihm_fit, "calc_spectra_obj",
+                        lambda p, ns, acqus, N: [[SimpleNamespace(k=1.0)]])
+    monkeypatch.setattr(eng.pyihm_fit, "pre_alignment",
+                        lambda exp, acqus, ns, N, plims, p, dbg=False: p)
+
+    e = eng.AnalysisEngine()
+    e._state.update(M=M, param=param, lims=[(6.0, 4.0)], I=1.0,
+                    c_idx=[], Hs=[1], clean_Hs=[1], comp_names=["A"])
+
+    errors, finished = [], []
+    loop = QEventLoop()
+    e.error.connect(lambda step, msg: (errors.append(msg), loop.quit()))
+    e.fit_finished.connect(lambda r: (finished.append(r), loop.quit()))
+    QTimer.singleShot(15000, loop.quit)   # safety net
+    e.run_fit("fast")
+    loop.exec()
+
+    assert not any("UnboundLocalError" in m for m in errors), errors
+    assert not errors, errors
+    assert len(finished) == 1
+    assert finished[0]["concentrations"][0] == pytest.approx(1.0)

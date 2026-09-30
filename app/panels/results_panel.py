@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QSplitter, QFileDialog,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Qt
 
 from ..widgets.spectrum_viewer import SpectrumViewer
 

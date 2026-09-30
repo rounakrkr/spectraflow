@@ -3,7 +3,6 @@ Theme Manager for SpectraFlow.
 Handles dark/light theme switching with QSS stylesheets.
 """
 
-import os
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal

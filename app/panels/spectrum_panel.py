@@ -4,10 +4,10 @@ import os
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QFileDialog, QListWidget,
-    QListWidgetItem, QCheckBox, QSplitter, QMessageBox,
+    QPushButton, QFileDialog, QListWidget,
+    QListWidgetItem, QSplitter, QMessageBox,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 
 from ..widgets.spectrum_viewer import SpectrumViewer
 
