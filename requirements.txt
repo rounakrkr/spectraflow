@@ -2,3 +2,11 @@ PySide6>=6.5.0
 pyqtgraph>=0.13.0
 numpy>=1.24.0
 lmfit>=1.2.0
+# NMR analysis backend — install from GitHub repos:
+#   pip install git+https://github.com/MetallerTM/pyihm.git
+#   pip install git+https://github.com/MetallerTM/klassez.git
+# Or install as editable from local clones:
+#   pip install -e ../pyihm
+#   pip install -e ../klassez
+pyihm>=2.0.0
+klassez>=0.2.2
