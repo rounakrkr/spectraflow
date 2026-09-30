@@ -159,6 +159,11 @@ class MainWindow(QMainWindow):
         # Fit runner start → engine
         self._fit_runner.fit_requested.connect(self._on_fit_requested)
 
+        # FIX #6: Fit runner stop → engine cancel
+        self._fit_runner.fit_started.connect(
+            lambda: None)  # placeholder for future use
+        self._fit_runner._stop_btn.clicked.connect(self._engine.cancel_fit)
+
         # Calibration done → apply drift/intensity to engine
         self._calibration.calibration_done.connect(self._on_calibration_done)
 
@@ -196,7 +201,11 @@ class MainWindow(QMainWindow):
         self._engine.load_mixture(mix_path, proc_opt=proc_opt)
 
     def _on_mixture_loaded(self, ppm, data):
-        """When mixture is loaded, push to viewer and auto-load components."""
+        """When mixture is loaded, push to viewer and auto-load components.
+
+        FIX #3: Also checks engine state comp_paths (set by .inp file),
+        not just _state_comp_paths from manual config.
+        """
         # Show spectrum in viewer panel
         self._spectrum.add_spectrum("Mixture", ppm, data)
         # Also set it in regions, calibration, peaks panels
@@ -207,9 +216,15 @@ class MainWindow(QMainWindow):
         # Navigate to viewer
         self._navigate("viewer")
 
-        # Auto-load components if paths were provided
+        # Auto-load components: check manual path first, then engine state (.inp)
+        comp_paths = None
         if hasattr(self, "_state_comp_paths") and self._state_comp_paths:
-            self._engine.load_components(self._state_comp_paths)
+            comp_paths = self._state_comp_paths
+        elif self._engine._state["comp_paths"]:
+            comp_paths = self._engine._state["comp_paths"]
+
+        if comp_paths:
+            self._engine.load_components(comp_paths)
 
     def _on_components_loaded(self, components, names):
         """When components are loaded, push to calibration and peak editor."""
@@ -242,7 +257,11 @@ class MainWindow(QMainWindow):
         self._navigate("calibration")
 
     def _on_calibration_done(self, cal_data):
-        """Apply drift and intensity corrections from calibration panel to engine."""
+        """Apply drift and intensity corrections from calibration panel to engine.
+
+        FIX #1: After calibration, generate params (correct order:
+        regions → calibrate → generate_params → fit).
+        """
         for comp_idx, adjustments in cal_data.items():
             drift = adjustments.get("drift", 0.0)
             intensity = adjustments.get("intensity", 1.0)
@@ -251,20 +270,52 @@ class MainWindow(QMainWindow):
             if abs(intensity - 1.0) > 1e-6:
                 self._engine.set_initial_concentration(comp_idx, intensity)
         self._terminal.write_success("✅ Calibration applied")
+
+        # FIX #1: NOW generate params (after calibration, not after regions)
+        if self._engine.has_mixture and self._engine.has_components and self._engine.has_regions:
+            self._engine.generate_params()
+
         # Navigate to peak editor
         self._navigate("peaks")
 
     def _on_regions_set(self, regions: list):
-        """After regions are set in engine, generate parameters."""
-        if self._engine.has_mixture and self._engine.has_components:
-            self._engine.generate_params()
+        """After regions are set in engine.
+
+        FIX #1: Does NOT auto-trigger generate_params anymore.
+        Params are generated after calibration is done.
+        Navigate to calibration so user can adjust drift/intensity.
+        """
+        pass  # intentionally empty — no auto-trigger
 
     def _on_fit_requested(self, method: str):
-        """When user clicks Run Fit in the fit runner panel."""
+        """When user clicks Run Fit in the fit runner panel.
+
+        FIX #6: Uses method from input config (via _state_method), not hardcoded.
+        Also auto-generates params if user skipped calibration (optional step).
+        """
+        # Use the method from input config if fit_runner sends default
+        actual_method = method or getattr(self, "_state_method", "tight")
+
+        # If params not ready, try to generate them now
         if self._engine._state["param"] is None:
-            self._terminal.write_error("Parameters not generated yet. Complete previous steps.")
-            return
-        self._engine.run_fit(method or getattr(self, "_state_method", "tight"))
+            if self._engine.has_mixture and self._engine.has_components and self._engine.has_regions:
+                self._terminal.write("Auto-generating parameters...", "#8ea2c0")
+                # generate_params is async, so connect a one-shot to run fit after
+                def _after_params(param):
+                    self._engine.params_ready.disconnect(_after_params)
+                    self._engine.run_fit(actual_method)
+                self._engine.params_ready.connect(_after_params)
+                self._engine.generate_params()
+                return
+            else:
+                self._terminal.write_error(
+                    "Cannot start fit. Need: mixture + components + regions. "
+                    "Complete previous steps."
+                )
+                self._fit_runner._on_stop()
+                return
+
+        self._engine.run_fit(actual_method)
 
     def _on_fit_finished(self, results: dict):
         """When fit completes, push results to results panel."""

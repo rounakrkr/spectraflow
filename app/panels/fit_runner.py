@@ -5,7 +5,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QProgressBar, QSplitter,
-    QTextEdit,
+    QTextEdit, QComboBox,
 )
 from PySide6.QtCore import Signal, Qt, QTimer
 from PySide6.QtGui import QFont, QTextCursor, QColor
@@ -78,6 +78,14 @@ class FitRunnerPanel(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
 
+        # FIX #6: method selector
+        btn_row.addWidget(QLabel("Method:"))
+        self._method_combo = QComboBox()
+        self._method_combo.addItems(["tight", "fast", "custom"])
+        self._method_combo.setToolTip("tight = Nelder + leastsq, fast = leastsq only")
+        self._method_combo.setMinimumWidth(100)
+        btn_row.addWidget(self._method_combo)
+
         self._start_btn = QPushButton("▶  Start Fit")
         self._start_btn.setObjectName("primary_btn")
         self._start_btn.setMinimumHeight(44)
@@ -142,7 +150,7 @@ class FitRunnerPanel(QWidget):
         self._timer.start(1000)
         self.log("Fit started.")
         self.fit_started.emit()
-        self.fit_requested.emit("tight")  # emit method to engine
+        self.fit_requested.emit(self._method_combo.currentText())  # FIX #6: use selected method
 
     def _on_stop(self):
         self._running = False
