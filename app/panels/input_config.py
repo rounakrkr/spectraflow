@@ -224,15 +224,6 @@ class InputConfigPanel(QWidget):
         self._comp_paths.clear()
         self._comp_list.clear()
 
-    def _load_input_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open pyIHM Input File", "",
-            "Input Files (pyihm_input*);;All Files (*)",
-        )
-        if path:
-            # TODO: parse with pyihm.input_reading and populate fields
-            pass
-
     def _build_config(self) -> dict:
         """Build the full configuration dict — single source of truth."""
         methods = ["fast", "tight", "custom"]

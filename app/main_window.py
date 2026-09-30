@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QStackedWidget,
     QStatusBar, QLabel, QApplication, QMessageBox,
 )
-from PySide6.QtCore import Qt
 
 from .theme.theme_manager import ThemeManager, COLORS
 from .core.engine import AnalysisEngine

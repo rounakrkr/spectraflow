@@ -3,7 +3,7 @@
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QComboBox, QSplitter,
+    QPushButton, QFrame, QSplitter,
     QSpinBox,
 )
 from PySide6.QtCore import Signal, Qt

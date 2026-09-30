@@ -30,12 +30,21 @@ A beautiful, modern desktop application for NMR mixture deconvolution using Indi
 ## Quick Start
 
 ```bash
-# Install dependencies
+# 1. GUI dependencies
 pip install PySide6 pyqtgraph numpy lmfit
 
-# Run
+# 2. NMR backend (install klassez FIRST, then pyihm without dependency resolution)
+pip install git+https://github.com/MetallerTM/klassez.git
+pip install --no-deps git+https://github.com/MetallerTM/pyihm.git
+# pyihm's own klassez>=0.4a.6 pin can't be satisfied by any released klassez
+# version, so a plain `pip install pyihm` fails to resolve. Its other
+# requirements (nmrglue, csaps, matplotlib, ...) are pulled in by klassez.
+
+# 3. Run
 python main.py
 ```
+
+Run the tests with `pip install -r requirements-dev.txt` (after step 2) and `pytest`.
 
 Or double-click `SpectraFlow.bat` on Windows.
 

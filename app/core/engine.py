@@ -23,13 +23,14 @@ FIX LOG (v2):
 import os
 import threading
 import traceback
-from copy import deepcopy
 
 import numpy as np
 import klassez as kz
 import lmfit as l
 
 from PySide6.QtCore import QObject, Signal, QThread
+
+from app.core.workers import FitCancelled
 
 # pyihm imports — the library stays unchanged
 import pyihm.input_reading as pyihm_input
@@ -164,7 +165,6 @@ class AnalysisEngine(QObject):
         def _do_load():
             kws = mix_kws or {}
             M = kz.Spectrum_1D(path, **kws)
-            acqus = dict(M.acqus)
 
             # Processing options (pyihm default: all off)
             if proc_opt:
@@ -364,7 +364,6 @@ class AnalysisEngine(QObject):
 
         def _do_gen():
             acqus = dict(M.acqus)
-            N = M.r.shape[-1]
 
             # Helper: check if chemical shift is within fit regions
             def is_in(x, Bs):
@@ -460,6 +459,9 @@ class AnalysisEngine(QObject):
         cancel_event = self._cancel  # local ref for closure
 
         def _do_fit():
+            # `param` is re-bound by pre_alignment below; without this it
+            # becomes a local and the read just after raises UnboundLocalError.
+            nonlocal param
             # Add iteration counter
             if "count" in param:
                 param["count"].set(value=0)
@@ -470,7 +472,7 @@ class AnalysisEngine(QObject):
             def f2min_gui(param, N_spectra, acqus, N, exp, I, plims):
                 # FIX #6: cooperative cancellation
                 if cancel_event.is_set():
-                    raise _FitCancelled("Fit cancelled by user")
+                    raise FitCancelled("Fit cancelled by user")
 
                 param["count"].value += 1
                 count = int(param["count"].value)
@@ -511,7 +513,7 @@ class AnalysisEngine(QObject):
             elif method == "tight":
                 result = minner.minimize(method="Nelder", max_nfev=10000)
                 if cancel_event.is_set():
-                    raise _FitCancelled("Fit cancelled by user")
+                    raise FitCancelled("Fit cancelled by user")
                 result = minner.minimize(
                     method="leastsq", params=result.params,
                     max_nfev=10000, xtol=1e-8, ftol=1e-8, gtol=1e-8,
@@ -520,7 +522,7 @@ class AnalysisEngine(QObject):
                 # FIX #3: honour fit_kws from input file
                 for idx in range(len(fit_kws.keys())):
                     if cancel_event.is_set():
-                        raise _FitCancelled("Fit cancelled by user")
+                        raise FitCancelled("Fit cancelled by user")
                     kws = dict(fit_kws[idx])
                     if kws.get("method") == "leastsq":
                         tol = kws.pop("tol", 1e-5)
@@ -693,8 +695,3 @@ class AnalysisEngine(QObject):
         # Store reference to prevent GC
         self._workers.append(worker)
         worker.start()
-
-
-class _FitCancelled(Exception):
-    """Raised when fit is cancelled by user via cancel_fit()."""
-    pass

@@ -4,9 +4,9 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QListWidget, QListWidgetItem,
+    QPushButton, QFrame, QListWidget,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal
 
 from ..theme.theme_manager import COLORS
 from ..widgets.spectrum_viewer import SpectrumViewer
