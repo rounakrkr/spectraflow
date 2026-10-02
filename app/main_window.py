@@ -2,12 +2,15 @@
 Main application window — sidebar + stacked panels + status bar.
 """
 
+import os
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QStackedWidget,
     QStatusBar, QLabel, QApplication, QMessageBox,
 )
 
 from .theme.theme_manager import ThemeManager, COLORS
+from .core import exporter
 from .core.engine import AnalysisEngine
 from .widgets.gradient_background import GradientBackground
 from .widgets.sidebar import Sidebar
@@ -166,6 +169,9 @@ class MainWindow(QMainWindow):
         # Calibration done → apply drift/intensity to engine
         self._calibration.calibration_done.connect(self._on_calibration_done)
 
+        # Results exports → terminal
+        self._results.exported.connect(lambda msg: self._terminal.write_success(f"✅ {msg}"))
+
     # ── Engine event handlers ──────────────────────────────
     def _on_config_ready(self, config: dict):
         """When input config panel emits a complete config, start loading."""
@@ -269,6 +275,9 @@ class MainWindow(QMainWindow):
             if abs(intensity - 1.0) > 1e-6:
                 self._engine.set_initial_concentration(comp_idx, intensity)
         self._terminal.write_success("✅ Calibration applied")
+        if self._calibration.write_cal_files:
+            for path in self._engine.save_calibrated_components():
+                self._terminal.write_success(f"✅ Saved {path}")
 
         # FIX #1: NOW generate params (after calibration, not after regions)
         if self._engine.has_mixture and self._engine.has_components and self._engine.has_regions:
@@ -314,7 +323,30 @@ class MainWindow(QMainWindow):
                 self._fit_runner._on_stop()
                 return
 
-        self._engine.run_fit(actual_method)
+        self._engine.run_fit(actual_method, align=self._fit_runner.align_enabled)
+
+    def _default_output_root(self) -> str | None:
+        """Where to auto-save: the .inp's own output name, else next to the mixture."""
+        root = self._engine.output_root
+        if root:
+            return root
+        mix = self._engine._state["mix_path"]
+        if not mix:
+            return None
+        stem = os.path.splitext(os.path.basename(os.path.normpath(mix)))[0] or "mixture"
+        return os.path.join(os.path.dirname(os.path.abspath(mix)), f"{stem}-fit")
+
+    def _autosave_results(self, results: dict):
+        root = self._default_output_root()
+        if root is None:
+            self._terminal.write_error("Auto-save skipped: no output location known")
+            return
+        try:
+            written = exporter.save_all(root, results, **self._engine.figure_options)
+        except (exporter.ExportError, OSError, ValueError) as e:
+            self._terminal.write_error(f"Auto-save failed: {e}")
+            return
+        self._terminal.write_success(f"✅ Outputs saved: {written.get('report', written['csv'])}")
 
     def _on_fit_finished(self, results: dict):
         """When fit completes, push results to results panel."""
@@ -329,7 +361,10 @@ class MainWindow(QMainWindow):
             components=results["components"],
             concentrations=results["concentrations"],
             component_names=results.get("component_names"),
+            export_data=results,
         )
+        if self._fit_runner.autosave_enabled:
+            self._autosave_results(results)
         # Update dashboard
         if hasattr(self._dashboard, "_stat_cards") and len(self._dashboard._stat_cards) >= 3:
             self._dashboard._stat_cards[2].set_value(f"{results['nfev']} evals")

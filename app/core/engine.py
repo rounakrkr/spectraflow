@@ -67,6 +67,8 @@ def read_input_file_resolved(path):
     base = os.path.dirname(os.path.abspath(path))
     return {
         "filename": filename,
+        "out_root": resolve_input_path(filename, base),
+        "plt_opt": dict(plt_opt),
         "mix_path": resolve_input_path(mix_path, base),
         "mix_kws": mix_kws,
         "mix_txtf": resolve_input_path(mix_txtf, base) if mix_txtf else mix_txtf,
@@ -155,6 +157,11 @@ class AnalysisEngine(QObject):
             "concentrations": None,   # ndarray — final concentrations
             "opt_spectra": None,      # list[ndarray] — optimized component spectra
             "opt_total": None,        # ndarray — total fit
+            "mix_path": None,         # str — mixture spectrum location (for the report)
+            "out_root": None,         # str — output root from the input file (no extension)
+            "plt_opt": {},            # dict — figure format / dpi from the input file
+            "drifts": [],             # list[float] — chemical-shift drift applied per component
+            "results": None,          # dict — last fit_finished payload
         }
 
     # ── Accessors ───────────────────────────────────────────
@@ -232,6 +239,7 @@ class AnalysisEngine(QObject):
 
         def _on_done(M):
             self._state["M"] = M
+            self._state["mix_path"] = path
             self._state["acqus"] = dict(M.acqus)
             self._state["ppm"] = M.ppm
             self._state["exp"] = np.copy(M.r)
@@ -261,6 +269,7 @@ class AnalysisEngine(QObject):
             self._state["exp"] = data
             self._state["acqus"] = None
             self._state["M"] = None
+            self._state["mix_path"] = path
             self.log.emit(f"Text spectrum loaded: {len(ppm)} points")
             self.mixture_loaded.emit(ppm, data)
 
@@ -333,6 +342,7 @@ class AnalysisEngine(QObject):
             self._state["components"] = components
             self._state["comp_names"] = comp_names
             self._state["Hs"] = list(use_Hs)
+            self._state["drifts"] = [0.0] * len(components)
 
             # Compute initial intensity correction
             M = self._state["M"]
@@ -463,14 +473,15 @@ class AnalysisEngine(QObject):
         self._run_worker(_do_gen, _on_done, "generate_params")
 
     # ── Step 6: Run fit ────────────────────────────────────
-    def run_fit(self, method: str = "tight"):
+    def run_fit(self, method: str = "tight", align: bool = True):
         """Run the IHM fit in a background thread.
 
         Emits fit_progress(iteration, target) during iteration,
         and fit_finished(results_dict) on completion.
 
         FIX #3: Supports 'custom' method using state fit_kws.
-        FIX #5: Runs pre-alignment by default (like pyihm).
+        FIX #5: Runs pre-alignment by default (like pyihm); ``align=False``
+        skips it (pyihm's ``--noalgn``).
         FIX #6: Cancel via self._cancel event; stop button actually works.
         """
         M = self._state["M"]
@@ -498,6 +509,7 @@ class AnalysisEngine(QObject):
         exp_T = np.concatenate([exp[w] for w in plims])
 
         cancel_event = self._cancel  # local ref for closure
+        history: list[tuple[int, float]] = []
 
         def _do_fit():
             # `param` is re-bound by pre_alignment below; without this it
@@ -524,22 +536,28 @@ class AnalysisEngine(QObject):
                 residual = exp / I - total
                 target = np.sum(residual**2) / len(residual)
 
+                history.append((count, float(target)))
+
                 # Emit progress every 5 iterations
                 if count % 5 == 0:
                     self.fit_progress.emit(count, target)
 
                 return residual
 
-            # FIX #5: pre-alignment (pyihm default)
-            self.log.emit("Running pre-alignment...")
-            try:
-                param = pyihm_fit.pre_alignment(
-                    exp, acqus, N_spectra, N, plims, param, False
-                )
-                param["count"].set(value=0)
-                self.log.emit("Pre-alignment done.")
-            except Exception as e:
-                self.log.emit(f"⚠ Pre-alignment skipped: {e}")
+            # FIX #5: pre-alignment (pyihm default, skipped with align=False)
+            if align:
+                self.log.emit("Running pre-alignment...")
+                try:
+                    param = pyihm_fit.pre_alignment(
+                        exp, acqus, N_spectra, N, plims, param, False
+                    )
+                    param["count"].set(value=0)
+                    self.log.emit("Pre-alignment done.")
+                except Exception as e:
+                    self.log.emit(f"⚠ Pre-alignment skipped: {e}")
+            else:
+                self.log.emit("Pre-alignment skipped (disabled).")
+            history.clear()
 
             minner = l.Minimizer(
                 f2min_gui, param,
@@ -607,6 +625,9 @@ class AnalysisEngine(QObject):
 
             KH = Hf / Hs_used
             concentrations *= KH
+            for peaks, kh in zip(opt_spectra_obj, KH):
+                for peak in peaks:
+                    peak.k /= kh
             c_norm, I_corr = kz.misc.molfrac(concentrations)
 
             self._state["result"] = result
@@ -627,12 +648,36 @@ class AnalysisEngine(QObject):
                 "I": I * I_corr,
                 "nfev": result.nfev,
                 "message": result.message,
+                "Hs": [float(h) for h in Hs_used],
+                "peaks": [list(peaks) for peaks in opt_spectra_obj],
+                "component_idx": self._component_numbers(popt, len(c_norm)),
+                "lims": [tuple(w) for w in lims],
+                "plims": plims,
+                "mixture_path": self._state.get("mix_path"),
+                "x_label": self._x_label(acqus),
+                "convergence": list(history),
             }
+            self._state["results"] = results_dict
 
             self.log.emit(f"Fit complete: {result.nfev} evaluations")
             self.fit_finished.emit(results_dict)
 
         self._run_worker(_do_fit, _on_done, "run_fit")
+
+    @staticmethod
+    def _component_numbers(popt, n: int) -> list[int]:
+        """1-based component numbers from the ``S<n>_I`` parameter names."""
+        try:
+            return [int(k.split("_")[0].replace("S", "")) for k in popt if "I" in k]
+        except ValueError:
+            return list(range(1, n + 1))
+
+    @staticmethod
+    def _x_label(acqus) -> str | None:
+        try:
+            return r"$\delta\ $" + kz.misc.nuc_format(acqus["nuc"]) + r" /ppm"
+        except Exception:
+            return None
 
     def cancel_fit(self):
         """Request cancellation of a running fit.  (#6 fix)"""
@@ -659,6 +704,8 @@ class AnalysisEngine(QObject):
             self._state["Hs"] = parsed["Hs"]
             self._state["I0"] = parsed["I0"]
             self._state["comp_paths"] = parsed["comp_path"]
+            self._state["out_root"] = parsed["out_root"]
+            self._state["plt_opt"] = parsed["plt_opt"]
 
             if parsed["lims"]:
                 self._state["lims"] = [(max(r), min(r)) for r in parsed["lims"]]
@@ -680,11 +727,16 @@ class AnalysisEngine(QObject):
 
     # ── Calibration helpers ────────────────────────────────
     def apply_drift(self, comp_idx: int, drift_ppm: float):
-        """Apply a chemical-shift drift correction to a single component."""
+        """Set the chemical-shift drift of a single component (absolute, idempotent)."""
         if comp_idx >= len(self._state["comp_peaks"]):
             return
+        drifts = self._state["drifts"]
+        if len(drifts) < len(self._state["comp_peaks"]):
+            drifts.extend([0.0] * (len(self._state["comp_peaks"]) - len(drifts)))
+        delta = drift_ppm - drifts[comp_idx]
+        drifts[comp_idx] = drift_ppm
         for _, peak in self._state["comp_peaks"][comp_idx].items():
-            peak.u += drift_ppm
+            peak.u += delta
         # Recompute the component spectrum
         spectrum = np.sum(
             [peak() for _, peak in self._state["comp_peaks"][comp_idx].items()],
@@ -692,6 +744,46 @@ class AnalysisEngine(QObject):
         )
         self._state["components"][comp_idx] = spectrum
         self.log.emit(f"Applied drift of {drift_ppm:.4f} ppm to component {comp_idx + 1}")
+
+    def save_calibrated_components(self) -> list[str]:
+        """Write each component's current peaks to ``<name>-cal.fvf`` (as pyihm's --cal does).
+
+        Components re-load these calibrated files automatically next time.
+        Returns the written paths.
+        """
+        st = self._state
+        if not st["comp_peaks"] or st["ppm"] is None:
+            self.error.emit("save_calibration", "Load components first")
+            return []
+        lims = (float(np.max(st["ppm"])), float(np.min(st["ppm"])))
+        written = []
+        for path, peaks in zip(st["comp_paths"], st["comp_peaks"]):
+            base, ext = os.path.splitext(path)
+            if base.endswith("-cal"):
+                base = base[:-4]
+            target = f"{base}-cal{ext or '.fvf'}"
+            try:
+                kz.fit.write_vf(target, peaks, lims, 1, header=True)
+            except OSError as e:
+                self.error.emit("save_calibration", f"Cannot write {target}: {e}")
+                continue
+            written.append(target)
+        if written:
+            self.log.emit(f"Calibrated components saved: {', '.join(os.path.basename(w) for w in written)}")
+        return written
+
+    @property
+    def last_results(self) -> dict | None:
+        return self._state["results"]
+
+    @property
+    def output_root(self) -> str | None:
+        return self._state["out_root"]
+
+    @property
+    def figure_options(self) -> dict:
+        opt = self._state["plt_opt"] or {}
+        return {"ext": opt.get("ext", "png"), "dpi": opt.get("dpi", 300)}
 
     def set_initial_concentration(self, comp_idx: int, value: float):
         """Set the initial guess for a component's concentration."""

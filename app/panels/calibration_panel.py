@@ -3,7 +3,7 @@
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QComboBox, QSplitter,
+    QPushButton, QFrame, QComboBox, QSplitter, QCheckBox,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -42,6 +42,11 @@ class CalibrationPanel(QWidget):
         title.setObjectName("subheading")
         tb.addWidget(title)
         tb.addStretch()
+
+        self._write_cal_chk = QCheckBox("Write -cal.fvf files")
+        self._write_cal_chk.setChecked(True)
+        self._write_cal_chk.setToolTip("Save calibrated copies of the component files next to the originals")
+        tb.addWidget(self._write_cal_chk)
 
         reset_btn = QPushButton("↺ Reset All")
         reset_btn.clicked.connect(self._reset_all)
@@ -125,6 +130,10 @@ class CalibrationPanel(QWidget):
         self._comp_combo.addItem(f"{idx+1}. {name}")
         self._viewer.plot(ppm, data, name=name, color=color, width=1.0)
         self._update_summary()
+
+    @property
+    def write_cal_files(self) -> bool:
+        return self._write_cal_chk.isChecked()
 
     # ── Slots ───────────────────────────────────────────────
     def _on_comp_changed(self, idx):
