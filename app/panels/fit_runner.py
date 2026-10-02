@@ -19,6 +19,7 @@ class FitRunnerPanel(QWidget):
     fit_started = Signal()
     fit_finished = Signal(object)      # result dict
     fit_requested = Signal(str)        # method name — wired to engine.run_fit
+    stop_requested = Signal()          # user pressed Stop — wired to engine.cancel_fit
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,14 +172,36 @@ class FitRunnerPanel(QWidget):
         self.fit_started.emit()
         self.fit_requested.emit(self._method_combo.currentText())  # FIX #6: use selected method
 
-    def _on_stop(self):
+    def _reset_controls(self):
+        """Back to the idle state: Start visible, Stop/progress hidden, timer off."""
         self._running = False
         self._start_btn.setVisible(True)
         self._stop_btn.setVisible(False)
         self._progress.setVisible(False)
-        self._status_label.setText("⏹ Stopped")
         self._timer.stop()
+
+    def _on_stop(self):
+        """Stop button: update the UI at once and ask the engine to cancel."""
+        self._reset_controls()
+        self._status_label.setText("⏹ Stopped")
         self.log("Fit stopped by user.")
+        self.stop_requested.emit()
+
+    def abort_start(self):
+        """A start request could not be honoured (missing prerequisites)."""
+        self._reset_controls()
+        self._status_label.setText("Ready")
+
+    def on_fit_cancelled(self):
+        """Engine confirmed the cancellation. Not an error — no dialog."""
+        if self._running:                      # cancelled from somewhere other than Stop
+            self._reset_controls()
+            self._status_label.setText("⏹ Stopped")
+            self.log("Fit cancelled.")
+
+    def on_fit_error(self):
+        self._reset_controls()
+        self._status_label.setText("❌ Error")
 
     def _update_elapsed(self):
         elapsed = time.time() - self._start_time
@@ -208,12 +231,8 @@ class FitRunnerPanel(QWidget):
         )
 
     def on_fit_complete(self, result=None):
-        self._running = False
-        self._start_btn.setVisible(True)
-        self._stop_btn.setVisible(False)
-        self._progress.setVisible(False)
-        self._timer.stop()
-        self._status_label.setText("✓ Complete")
+        self._reset_controls()
+        self._status_label.setText("✅ Complete")
         elapsed = time.time() - self._start_time
         m, s = divmod(int(elapsed), 60)
         self.log(f"Fit completed in {m:02d}:{s:02d}.", "#66bb6a")

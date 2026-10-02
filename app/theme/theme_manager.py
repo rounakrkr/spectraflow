@@ -14,6 +14,7 @@ class ThemeManager(QObject):
     theme_changed = Signal(str)  # Emits "dark" or "light"
 
     THEME_DIR = Path(__file__).parent
+    ICON_DIR = THEME_DIR / "icons"
     THEMES = {"dark": "dark.qss", "light": "light.qss"}
 
     def __init__(self, parent=None):
@@ -37,6 +38,9 @@ class ThemeManager(QObject):
         if qss_path.exists():
             with open(qss_path, "r", encoding="utf-8") as f:
                 stylesheet = f.read()
+            # QSS cannot reference files relative to itself, so icon urls use a
+            # placeholder that is resolved to the absolute icon directory here.
+            stylesheet = stylesheet.replace("@ICONS@", self.ICON_DIR.as_posix())
             app.setStyleSheet(stylesheet)
             self._current_theme = theme_name
             self.theme_changed.emit(theme_name)

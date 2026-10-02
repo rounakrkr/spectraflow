@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
 
         # Backend engine
         self._engine = AnalysisEngine(self)
+        self._analysis_traces: list[str] = []   # spectrum-viewer traces from the current input
 
         # Build UI
         self._build_ui()
@@ -161,10 +162,13 @@ class MainWindow(QMainWindow):
         # Fit runner start → engine
         self._fit_runner.fit_requested.connect(self._on_fit_requested)
 
-        # FIX #6: Fit runner stop → engine cancel
-        self._fit_runner.fit_started.connect(
-            lambda: None)  # placeholder for future use
-        self._fit_runner._stop_btn.clicked.connect(self._engine.cancel_fit)
+        # Stop button → engine cancel; engine confirms via fit_cancelled (not an error)
+        self._fit_runner.stop_requested.connect(self._engine.cancel_fit)
+        e.fit_cancelled.connect(self._fit_runner.on_fit_cancelled)
+
+        # Generated parameters → Peak Editor (peaks inside the fit windows)
+        e.peaks_ready.connect(self._on_peaks_ready)
+        self._peaks.peaks_modified.connect(self._on_peaks_saved)
 
         # Calibration done → apply drift/intensity to engine
         self._calibration.calibration_done.connect(self._on_calibration_done)
@@ -184,6 +188,10 @@ class MainWindow(QMainWindow):
         if not mix_path:
             self._terminal.write_error("No mixture spectrum path specified")
             return
+
+        # A new load starts a new analysis (drops previous params/regions/components)
+        self._engine.reset()
+        self._clear_analysis_views()
 
         # Set boundaries
         self._engine.set_boundaries(bds)
@@ -211,8 +219,12 @@ class MainWindow(QMainWindow):
         FIX #3: Also checks engine state comp_paths (set by .inp file),
         not just _state_comp_paths from manual config.
         """
+        # Fresh mixture → drop everything derived from a previous one
+        self._clear_analysis_views()
+
         # Show spectrum in viewer panel
         self._spectrum.add_spectrum("Mixture", ppm, data)
+        self._analysis_traces.append("Mixture")
         # Also set it in regions, calibration, peaks panels
         self._regions.set_spectrum(ppm, data)
         self._calibration.set_experimental(ppm, data)
@@ -239,9 +251,17 @@ class MainWindow(QMainWindow):
 
         I = self._engine._state["I"] or 1.0
 
+        # Replace, never stack: a repeated load must not duplicate components
+        for tr in self._analysis_traces:
+            if tr != "Mixture":
+                self._spectrum.remove_spectrum(tr)
+        self._analysis_traces = [t for t in self._analysis_traces if t == "Mixture"]
+        self._calibration.clear_components()
+
         # Show components in spectrum viewer
         for i, (comp, name) in enumerate(zip(components, names)):
             self._spectrum.add_spectrum(name, ppm, comp * I)
+            self._analysis_traces.append(name)
 
         # Push to calibration panel
         for i, (comp, name) in enumerate(zip(components, names)):
@@ -253,6 +273,36 @@ class MainWindow(QMainWindow):
             self._dashboard._stat_cards[1].set_value(str(len(components)))  # components
 
         self._terminal.write_success(f"✅ {len(components)} components loaded")
+
+    def _clear_analysis_views(self):
+        """Remove traces/components derived from the previously loaded input."""
+        for tr in self._analysis_traces:
+            self._spectrum.remove_spectrum(tr)
+        self._analysis_traces = []
+        self._calibration.clear_all()
+        self._peaks.clear()
+
+    def _on_peaks_ready(self, peaks: list):
+        """Parameters were generated → fill the Peak Editor with the fitted peaks."""
+        acqus = self._engine.acqus or {}
+        sfo = acqus.get("SFO1")
+        if sfo:
+            self._peaks.set_spectrometer_frequency(float(sfo))
+        self._peaks.set_peaks(peaks)
+        self._terminal.write_success(f"✅ {len(peaks)} peaks loaded into the Peak Editor")
+
+    def _on_peaks_saved(self, peaks: list):
+        """Peak Editor 'Save' → write edited values into the fit's start parameters."""
+        res = self._engine.apply_peak_edits(peaks)
+        if res["applied"]:
+            self._terminal.write_success(f"✅ Applied edits to {res['applied']} peak(s)")
+        if res["added_ignored"]:
+            self._terminal.write(
+                f"⚠ {res['added_ignored']} added peak(s) not used by the fit "
+                "(pyihm fits only the peaks of the component files)", "#fbbf24")
+        if res["phase_ignored"]:
+            self._terminal.write(
+                f"⚠ Phase of {res['phase_ignored']} peak(s) is preview-only (not fitted)", "#fbbf24")
 
     def _on_regions_confirmed(self, regions: list):
         """When user confirms regions in the region selector panel."""
@@ -320,7 +370,7 @@ class MainWindow(QMainWindow):
                     "Cannot start fit. Need: mixture + components + regions. "
                     "Complete previous steps."
                 )
-                self._fit_runner._on_stop()
+                self._fit_runner.abort_start()
                 return
 
         self._engine.run_fit(actual_method, align=self._fit_runner.align_enabled)
@@ -350,9 +400,8 @@ class MainWindow(QMainWindow):
 
     def _on_fit_finished(self, results: dict):
         """When fit completes, push results to results panel."""
-        # Stop fit runner UI
-        self._fit_runner._on_stop()
-        self._fit_runner._status_label.setText("✅ Complete")
+        # Fit runner UI → complete (logs the elapsed time)
+        self._fit_runner.on_fit_complete(results)
 
         self._results.set_results(
             ppm=results["ppm"],
@@ -376,8 +425,7 @@ class MainWindow(QMainWindow):
         """Show a dialog when the engine reports an error."""
         # Stop fit runner if it was running
         if self._fit_runner._running:
-            self._fit_runner._on_stop()
-            self._fit_runner._status_label.setText("❌ Error")
+            self._fit_runner.on_fit_error()
         # Show dialog
         QMessageBox.warning(self, f"Error — {step}",
                             f"An error occurred during '{step}':\n\n{message}")

@@ -100,6 +100,8 @@ class CalibrationPanel(QWidget):
         card_lay.addWidget(self._int_slider)
 
         cl.addWidget(cal_card)
+        self._sliders = [self._drift_slider, self._int_slider]
+        ParameterSlider.align_group(self._sliders)
 
         # Per-component summary
         cl.addWidget(QLabel("All Components", objectName="section_title"))
@@ -109,10 +111,12 @@ class CalibrationPanel(QWidget):
         cl.addWidget(self._summary)
 
         cl.addStretch()
-        ctrl.setMinimumWidth(280)
+        ctrl.setMinimumWidth(400)
         splitter.addWidget(ctrl)
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 3)
+        splitter.setCollapsible(1, False)
+        splitter.setSizes([900, 420])
 
         root.addWidget(splitter, stretch=1)
 
@@ -130,6 +134,33 @@ class CalibrationPanel(QWidget):
         self._comp_combo.addItem(f"{idx+1}. {name}")
         self._viewer.plot(ppm, data, name=name, color=color, width=1.0)
         self._update_summary()
+
+    def clear_components(self):
+        """Drop every loaded component (keeps the experimental trace).
+
+        Called before a (re)load so repeated loads replace, not stack.
+        """
+        for comp in self._components:
+            self._viewer.remove_plot(comp["name"])
+        self._components.clear()
+        self._active_idx = 0
+        self._comp_combo.blockSignals(True)
+        self._comp_combo.clear()
+        self._comp_combo.blockSignals(False)
+        for sl, v in ((self._drift_slider, 0.0), (self._int_slider, 1.0)):
+            sl.blockSignals(True)
+            sl.value = v
+            sl.blockSignals(False)
+        self._update_summary()
+
+    def clear_all(self):
+        """Components and the experimental trace (new mixture loaded)."""
+        self.clear_components()
+        self._viewer.remove_plot("Experimental")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        ParameterSlider.align_group(self._sliders)   # sizes depend on the active theme
 
     @property
     def write_cal_files(self) -> bool:

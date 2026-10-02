@@ -178,6 +178,17 @@ class SpectrumPanel(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, name)
         self._spec_list.addItem(item)
 
+    def remove_spectrum(self, name: str):
+        """Remove one trace by name (no-op if absent)."""
+        if name not in self._spectra:
+            return
+        self._viewer.remove_plot(name)
+        del self._spectra[name]
+        for i in range(self._spec_list.count()):
+            if self._spec_list.item(i).data(Qt.ItemDataRole.UserRole) == name:
+                self._spec_list.takeItem(i)
+                break
+
     def _remove_selected(self):
         for item in self._spec_list.selectedItems():
             name = item.data(Qt.ItemDataRole.UserRole)
