@@ -90,6 +90,7 @@ class _Worker(QThread):
     """
     completed = Signal(object)   # result        (#6 fix: renamed)
     failed = Signal(str)         # error message  (#6 fix: renamed)
+    cancelled = Signal()         # fn raised FitCancelled — user action, not an error
     progress = Signal(str)       # status text
 
     def __init__(self, fn, *args, **kwargs):
@@ -102,6 +103,8 @@ class _Worker(QThread):
         try:
             result = self._fn(*self._args, **self._kwargs)
             self.completed.emit(result)
+        except FitCancelled:
+            self.cancelled.emit()
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
 
@@ -122,6 +125,8 @@ class AnalysisEngine(QObject):
     params_ready = Signal(object)                  # lmfit.Parameters
     fit_progress = Signal(int, float)              # iteration, target
     fit_finished = Signal(dict)                    # full results dict
+    fit_cancelled = Signal()                       # fit stopped by the user (not an error)
+    peaks_ready = Signal(list)                     # editable peak table (see generate_params)
     error = Signal(str, str)                       # step, message
     log = Signal(str)                              # status message
 
@@ -133,8 +138,9 @@ class AnalysisEngine(QObject):
         self.reset()
 
     def reset(self):
-        """Clear all state for a fresh analysis."""
-        self._cancel.clear()
+        """Clear all state for a fresh analysis (a fit still running is cancelled)."""
+        self._cancel.set()
+        self._cancel = threading.Event()
         self._state = {
             "M": None,               # kz.Spectrum_1D — mixture spectrum
             "acqus": None,            # dict — acquisition parameters
@@ -162,6 +168,7 @@ class AnalysisEngine(QObject):
             "plt_opt": {},            # dict — figure format / dpi from the input file
             "drifts": [],             # list[float] — chemical-shift drift applied per component
             "results": None,          # dict — last fit_finished payload
+            "peak_table": [],         # list[dict] — peaks inside the fit windows (editor)
         }
 
     # ── Accessors ───────────────────────────────────────────
@@ -412,6 +419,7 @@ class AnalysisEngine(QObject):
             bds = self._state["bds"]
 
         self.log.emit("Generating fit parameters...")
+        comp_names = list(self._state["comp_names"])
 
         def _do_gen():
             acqus = dict(M.acqus)
@@ -458,10 +466,25 @@ class AnalysisEngine(QObject):
             # Generate parameters
             param = pyihm_gen.main(M, clean_components, bds, lims, clean_Hs, c_idx, clean_I0)
 
-            return param, clean_components, clean_Hs, c_idx
+            # Editable peak table: one row per peak that is actually fitted.
+            # "key"/"idx" locate the lmfit parameters (S<n>_u<idx>, ...).
+            peak_table = []
+            for k in c_idx:
+                name = comp_names[k] if k < len(comp_names) else f"component {k + 1}"
+                for pk_idx, peak in comp_peaks_in[k].items():
+                    peak_table.append({
+                        "u": float(peak.u), "fwhm": float(peak.fwhm), "k": float(peak.k),
+                        "b": float(peak.b), "phi": float(peak.phi),
+                        "group": int(peak.group), "group0": int(peak.group),
+                        "comp": k + 1, "key": f"S{k + 1}_", "idx": pk_idx,
+                        "label": f"{name} · peak {pk_idx}",
+                    })
+
+            return param, clean_components, clean_Hs, c_idx, peak_table
 
         def _on_done(result):
-            param, components, clean_Hs, c_idx = result
+            param, components, clean_Hs, c_idx, peak_table = result
+            self._state["peak_table"] = peak_table
             self._state["param"] = param
             self._state["c_idx"] = c_idx
             # FIX #2: save corrected Hs so concentration calc uses them
@@ -469,6 +492,7 @@ class AnalysisEngine(QObject):
             n_vary = len([p for p in param if param[p].vary])
             self.log.emit(f"Parameters ready: {n_vary} free parameters")
             self.params_ready.emit(param)
+            self.peaks_ready.emit([dict(p) for p in peak_table])
 
         self._run_worker(_do_gen, _on_done, "generate_params")
 
@@ -494,7 +518,9 @@ class AnalysisEngine(QObject):
             self.error.emit("run_fit", "Generate parameters first")
             return
 
-        self._cancel.clear()
+        # A fresh event per run: an old, still-unwinding worker keeps its own
+        # (set) event, so Stop → Start can never un-cancel it.
+        self._cancel = threading.Event()
         self.log.emit(f"Starting fit (method={method})...")
 
         acqus = dict(M.acqus)
@@ -601,7 +627,16 @@ class AnalysisEngine(QObject):
 
             return result
 
+        def _on_cancel():
+            if cancel_event is not self._cancel:
+                return        # a newer fit has started; this is a stale notification
+            self.log.emit("Fit cancelled.")
+            self.fit_cancelled.emit()
+
         def _on_done(result):
+            if cancel_event.is_set():       # Stop arrived just as the fit finished
+                _on_cancel()
+                return
             popt = result.params
             # Calculate optimized spectra
             opt_spectra = pyihm_fit.calc_spectra(popt, N_spectra, acqus, N)
@@ -662,7 +697,7 @@ class AnalysisEngine(QObject):
             self.log.emit(f"Fit complete: {result.nfev} evaluations")
             self.fit_finished.emit(results_dict)
 
-        self._run_worker(_do_fit, _on_done, "run_fit")
+        self._run_worker(_do_fit, _on_done, "run_fit", on_cancel=_on_cancel)
 
     @staticmethod
     def _component_numbers(popt, n: int) -> list[int]:
@@ -679,6 +714,74 @@ class AnalysisEngine(QObject):
         except Exception:
             return None
 
+    def apply_peak_edits(self, peaks: list[dict]) -> dict:
+        """Write edited peak values back into the fit's starting parameters.
+
+        Position, linewidth, intensity and Gaussian fraction of peaks that came
+        from :attr:`peaks_ready` are applied (bounds are widened/shifted so the
+        new start value is feasible). Phase and group edits are preview-only
+        (pyihm does not fit them) and peaks added in the editor have no
+        parameters to map to; both are counted, not silently dropped.
+        """
+        param = self._state["param"]
+        if param is None:
+            self.error.emit("apply_peak_edits", "Generate parameters first")
+            return {"applied": 0, "added_ignored": 0, "phase_ignored": 0}
+
+        lims = self._state["lims"] or []
+        applied = added = phase = 0
+        for p in peaks:
+            key, idx = p.get("key"), p.get("idx")
+            if key is None:
+                added += 1
+                continue
+            names = {c: f"{key}{c}{idx}" for c in "uskb"}
+            if any(n not in param for n in names.values()):
+                added += 1
+                continue
+
+            self._set_start_value(param[names["s"]], max(float(p["fwhm"]), 0.0))
+            self._set_start_value(param[names["k"]], max(float(p["k"]), 0.0))
+            self._set_start_value(param[names["b"]], min(max(float(p["b"]), 0.0), 1.0))
+
+            u_new = float(p["u"])
+            u_par = param[names["u"]]
+            if u_par.expr:                      # multiplet line: u = U + o
+                U_par = param.get(f"{key}U{p.get('group0', p.get('group', 0))}")
+                o_par = param.get(f"{key}o{idx}")
+                if U_par is not None and o_par is not None:
+                    self._set_start_value(o_par, u_new - float(U_par.value))
+            else:
+                self._shift_start_value(u_par, u_new, lims)
+            applied += 1
+            if abs(float(p.get("phi", 0.0))) > 1e-9:
+                phase += 1
+
+        self.log.emit(f"Peak edits applied to {applied} peak(s)"
+                      + (f"; {added} added peak(s) ignored (no fit parameters)" if added else "")
+                      + (f"; phase of {phase} peak(s) is preview-only" if phase else ""))
+        return {"applied": applied, "added_ignored": added, "phase_ignored": phase}
+
+    @staticmethod
+    def _set_start_value(par, value: float):
+        """Set a start value, widening bounds when the value lies outside them."""
+        lo, hi = par.min, par.max
+        par.set(min=min(lo, value), max=max(hi, value))
+        par.set(value=value)
+
+    @staticmethod
+    def _shift_start_value(par, value: float, lims):
+        """Move a chemical shift and its bounds together (keeps the tolerance
+        window), without letting the bounds leave the fit window it is in."""
+        delta = value - par.value
+        lo, hi = par.min + delta, par.max + delta
+        for w in lims:
+            if min(w) <= value <= max(w):
+                lo, hi = max(lo, min(w)), min(hi, max(w))
+                break
+        par.set(min=min(lo, value), max=max(hi, value))
+        par.set(value=value)
+
     def cancel_fit(self):
         """Request cancellation of a running fit.  (#6 fix)"""
         self._cancel.set()
@@ -693,6 +796,7 @@ class AnalysisEngine(QObject):
         using state comp_paths.  Handles mix_txtf.  Stores fit_kws.
         """
         self.log.emit(f"Reading input file: {path}")
+        self.reset()   # a new input must not inherit params/regions of the previous one
 
         def _do_load():
             return read_input_file_resolved(path)
@@ -793,7 +897,7 @@ class AnalysisEngine(QObject):
             self._state["I0"][comp_idx] = value
 
     # ── Internal ───────────────────────────────────────────
-    def _run_worker(self, fn, on_done, step_name: str):
+    def _run_worker(self, fn, on_done, step_name: str, on_cancel=None):
         """Launch a background worker, routing signals.
 
         FIX #6: uses 'completed'/'failed' to avoid QThread.finished shadow.
@@ -808,6 +912,8 @@ class AnalysisEngine(QObject):
 
         worker.completed.connect(on_done)
         worker.failed.connect(lambda msg: self.error.emit(step_name, msg))
+        if on_cancel is not None:
+            worker.cancelled.connect(on_cancel)
         # Use QThread.finished (not our custom signal) for cleanup
         worker.finished.connect(_cleanup)
         # Store reference to prevent GC

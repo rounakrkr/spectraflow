@@ -48,6 +48,7 @@ class PeakEditorPanel(QWidget):
         self._peaks: list[dict] = []
         self._active = 0
         self._drawn_peak_count = 0
+        self._preview_scale = 1.0      # raw line shapes → experimental intensity units
         self._exp_ppm = None
         self._exp_data = None
         self._colors = COLORS["dark"]
@@ -107,6 +108,11 @@ class PeakEditorPanel(QWidget):
         sel_row.addStretch()
         rl.addLayout(sel_row)
 
+        self._peak_info = QLabel("No peaks yet — run Calibration to generate parameters.")
+        self._peak_info.setObjectName("muted")
+        self._peak_info.setWordWrap(True)
+        rl.addWidget(self._peak_info)
+
         # Parameter sliders in a card
         card = QFrame()
         card.setObjectName("card")
@@ -139,6 +145,11 @@ class PeakEditorPanel(QWidget):
         sl_.addWidget(self._sl_sfo)
         rl.addWidget(sfo_card)
 
+        # One shared column grid for every slider so labels never clip and tracks align
+        self._sliders = [self._sl_pos, self._sl_fwhm, self._sl_k, self._sl_beta,
+                         self._sl_phi, self._sl_sfo]
+        ParameterSlider.align_group(self._sliders)
+
         # Group selector
         grp_row = QHBoxLayout()
         grp_row.addWidget(QLabel("Group:"))
@@ -151,17 +162,54 @@ class PeakEditorPanel(QWidget):
         rl.addLayout(grp_row)
 
         rl.addStretch()
-        right.setMinimumWidth(280)
+        right.setMinimumWidth(400)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 3)
+        splitter.setCollapsible(1, False)
+        splitter.setSizes([900, 420])
 
         root.addWidget(splitter, stretch=1)
 
     # ── Data ────────────────────────────────────────────────
+    def showEvent(self, event):
+        super().showEvent(event)
+        ParameterSlider.align_group(self._sliders)   # sizes depend on the active theme
+
     def set_spectrometer_frequency(self, sfo_mhz: float):
         """Set the 1H Larmor frequency (MHz) used by the Hz→ppm preview conversion."""
-        self._sl_sfo.value = float(sfo_mhz)
+        sfo = float(sfo_mhz)
+        lo, hi = self._sl_sfo.spinbox.minimum(), self._sl_sfo.spinbox.maximum()
+        if not lo <= sfo <= hi:
+            self._sl_sfo.set_range(min(lo, sfo * 0.5), max(hi, sfo * 1.5))
+        self._sl_sfo.value = sfo
+
+    def clear(self):
+        """Forget all peaks and traces (new input loaded)."""
+        for i in range(self._drawn_peak_count):
+            self._viewer.remove_plot(f"Peak_{i+1}")
+        self._viewer.remove_plot("Total Fit")
+        self._drawn_peak_count = 0
+        self._peaks = []
+        self._active = 0
+        self._peak_spin.blockSignals(True)
+        self._peak_spin.setMaximum(1)
+        self._peak_spin.setValue(1)
+        self._peak_spin.blockSignals(False)
+        self._peak_count.setText("/ 0")
+        self._peak_info.setText("No peaks yet — run Calibration to generate parameters.")
+
+    def _fit_slider_ranges(self):
+        """Widen slider ranges so every loaded peak value is reachable."""
+        if not self._peaks:
+            return
+        us = [p["u"] for p in self._peaks]
+        lo, hi = min(us), max(us)
+        if self._exp_ppm is not None and len(self._exp_ppm):
+            lo, hi = min(lo, float(np.min(self._exp_ppm))), max(hi, float(np.max(self._exp_ppm)))
+        self._sl_pos.set_range(min(-2.0, lo - 0.5), max(14.0, hi + 0.5))
+        self._sl_fwhm.set_range(0.0, max(100.0, 1.5 * max(p["fwhm"] for p in self._peaks)))
+        self._sl_k.set_range(0.0, max(2.0, 1.25 * max(p["k"] for p in self._peaks)))
 
     def set_experimental(self, ppm: np.ndarray, data: np.ndarray):
         self._exp_ppm = ppm
@@ -169,14 +217,46 @@ class PeakEditorPanel(QWidget):
         self._viewer.plot(ppm, data, name="Experimental", color="#e4e8ee", width=1.2)
 
     def set_peaks(self, peaks: list[dict]):
-        """peaks: list of {u, fwhm, k, b, phi, group}"""
+        """peaks: list of {u, fwhm, k, b, phi, group[, label, key]}
+
+        ``label`` (e.g. "bzac · peak 3") is shown under the selector; ``key``
+        is the engine's parameter prefix, passed back untouched on save.
+        """
         self._peaks = [dict(p) for p in peaks]
+        self._active = 0
+        self._fit_slider_ranges()
+        self._peak_spin.blockSignals(True)
         self._peak_spin.setMaximum(max(1, len(self._peaks)))
+        self._peak_spin.setValue(1)
+        self._peak_spin.blockSignals(False)
         self._peak_count.setText(f"/ {len(self._peaks)}")
+        self._calibrate_preview_scale()
         if self._peaks:
-            self._peak_spin.setValue(1)
             self._load_peak(0)
+        else:
+            self._peak_info.setText("No peaks in the selected fit regions.")
         self._redraw_all()
+
+    def _calibrate_preview_scale(self):
+        """Fix the preview's vertical scale once, when peaks are loaded.
+
+        Raw k·shape is ~1 while the spectrum is ~1e8, so the traces would be
+        invisible. The scale is frozen (not re-fitted on every slider move) so
+        that changing k still visibly changes the height.
+        """
+        self._preview_scale = 1.0
+        if self._exp_ppm is None or self._exp_data is None or not self._peaks:
+            return
+        ppm = np.asarray(self._exp_ppm, dtype=float)
+        total = np.zeros_like(ppm)
+        for p in self._peaks:
+            total += p["k"] * pseudo_voigt(ppm, p["u"], p["fwhm"], self._sl_sfo.value, p["b"], 0.0)
+        us = [p["u"] for p in self._peaks]
+        win = (ppm >= min(us) - 0.2) & (ppm <= max(us) + 0.2)
+        exp_peak = float(np.max(np.abs(np.asarray(self._exp_data)[win]))) if win.any() else 0.0
+        tot_peak = float(np.max(np.abs(total)))
+        if exp_peak > 0 and tot_peak > 0:
+            self._preview_scale = exp_peak / tot_peak
 
     # ── Peak management ─────────────────────────────────────
     def _add_peak(self):
@@ -219,6 +299,7 @@ class PeakEditorPanel(QWidget):
         if idx >= len(self._peaks):
             return
         p = self._peaks[idx]
+        self._peak_info.setText(p.get("label") or f"Peak {idx + 1}")
         for sl, key in [(self._sl_pos, "u"), (self._sl_fwhm, "fwhm"),
                         (self._sl_k, "k"), (self._sl_beta, "b"),
                         (self._sl_phi, "phi")]:
@@ -262,7 +343,8 @@ class PeakEditorPanel(QWidget):
         palette = ["#ff7043", "#66bb6a", "#ab47bc", "#ffa726", "#26c6da",
                    "#ec407a", "#9ccc65", "#5c6bc0", "#8d6e63", "#78909c"]
         for i, p in enumerate(self._peaks):
-            peak_data = p["k"] * pseudo_voigt(ppm, p["u"], p["fwhm"], sfo, p["b"], p["phi"])
+            peak_data = self._preview_scale * p["k"] * pseudo_voigt(
+                ppm, p["u"], p["fwhm"], sfo, p["b"], p["phi"])
             total += peak_data
             width = 2.0 if i == self._active else 0.8
             self._viewer.plot(ppm, peak_data, name=f"Peak_{i+1}",

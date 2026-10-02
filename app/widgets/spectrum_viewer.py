@@ -37,8 +37,13 @@ class SpectrumViewer(QWidget):
         self._pw = pg.PlotWidget()
         self._pw.setBackground("#141824")
         self._pw.showGrid(x=True, y=True, alpha=0.15)
-        self._pw.setLabel("bottom", "δ", units="ppm")
-        self._pw.setLabel("left", "Intensity", units="a.u.")
+        # Units go in the label text, not in pyqtgraph's `units=`: with units set,
+        # pyqtgraph auto-applies SI prefixes ("Ma.u." for 3e8, "mppm" when zoomed),
+        # which is wrong for arbitrary units. Ticks fall back to plain/scientific.
+        self._pw.setLabel("bottom", "δ (ppm)")
+        self._pw.setLabel("left", "Intensity (a.u.)")
+        for axis_name in ("bottom", "left"):
+            self._pw.getAxis(axis_name).enableAutoSIPrefix(False)
         self._pw.invertX(True)  # NMR convention
 
         # Style axes
