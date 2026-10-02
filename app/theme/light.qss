@@ -719,3 +719,20 @@ QScrollArea {
     background: transparent;
     border: none;
 }
+
+QListWidget::indicator {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #b0b8c4;
+    border-radius: 4px;
+    background-color: #ffffff;
+}
+
+QListWidget::indicator:hover {
+    border-color: #1976d2;
+}
+
+QListWidget::indicator:checked {
+    background-color: #1976d2;
+    border-color: #1976d2;
+}

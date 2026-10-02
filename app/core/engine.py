@@ -39,6 +39,47 @@ import pyihm.gen_param as pyihm_gen
 import pyihm.fit_mixture as pyihm_fit
 
 
+# ── Helper: resolve paths from a pyihm input file ──────────────────
+def resolve_input_path(p, base_dir):
+    """Resolve a path written in a pyihm input file.
+
+    pyihm itself resolves relative paths against the current working
+    directory. A GUI is usually started from somewhere else, so relative
+    paths are resolved against the folder of the input file instead
+    (falling back to the working directory if only that location exists).
+    """
+    p = str(p).strip()
+    if os.path.isabs(p):
+        return os.path.normpath(p)
+    candidate = os.path.normpath(os.path.join(base_dir, p))
+    if not os.path.exists(candidate) and os.path.exists(p):
+        return os.path.abspath(p)
+    return candidate
+
+
+def read_input_file_resolved(path):
+    """Parse a pyihm input file and return its settings as a dict,
+    with every file path made absolute (see :func:`resolve_input_path`)."""
+    ret = pyihm_input.read_input(path)
+    (filename, mix_path, mix_kws, mix_txtf, proc_opt,
+     comp_path, lims, bds, fit_kws, plt_opt, Hs, I0) = ret
+
+    base = os.path.dirname(os.path.abspath(path))
+    return {
+        "filename": filename,
+        "mix_path": resolve_input_path(mix_path, base),
+        "mix_kws": mix_kws,
+        "mix_txtf": resolve_input_path(mix_txtf, base) if mix_txtf else mix_txtf,
+        "proc_opt": proc_opt,
+        "comp_path": [resolve_input_path(c, base) for c in comp_path],
+        "lims": lims,
+        "bds": bds,
+        "fit_kws": fit_kws,
+        "Hs": Hs,
+        "I0": I0,
+    }
+
+
 # ── Helper: Background worker ──────────────────────────────────────
 class _Worker(QThread):
     """Generic worker that runs a callable in a background thread.
@@ -609,22 +650,7 @@ class AnalysisEngine(QObject):
         self.log.emit(f"Reading input file: {path}")
 
         def _do_load():
-            ret = pyihm_input.read_input(path)
-            (filename, mix_path, mix_kws, mix_txtf, proc_opt,
-             comp_path, lims, bds, fit_kws, plt_opt, Hs, I0) = ret
-            return {
-                "filename": filename,
-                "mix_path": mix_path,
-                "mix_kws": mix_kws,
-                "mix_txtf": mix_txtf,
-                "proc_opt": proc_opt,
-                "comp_path": comp_path,
-                "lims": lims,
-                "bds": bds,
-                "fit_kws": fit_kws,
-                "Hs": Hs,
-                "I0": I0,
-            }
+            return read_input_file_resolved(path)
 
         def _on_done(parsed):
             self._state["bds"] = parsed["bds"]
