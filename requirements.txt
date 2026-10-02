@@ -2,6 +2,7 @@ PySide6>=6.5.0
 pyqtgraph>=0.13.0
 numpy>=1.24.0
 lmfit>=1.2.0
+matplotlib>=3.7.0
 # NMR analysis backend -- NOT installable via `pip install -r` as-is:
 # pyihm (GitHub, 2.0.0) requires klassez>=0.4a.6, but no released klassez is
 # newer than 0.2.2, so resolution fails. Install them manually, in this order:

@@ -1,21 +1,27 @@
 """Results panel — concentrations table, fitted plot, export."""
 
+import os
+
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QTableWidget, QTableWidgetItem,
-    QHeaderView, QSplitter, QFileDialog,
+    QHeaderView, QSplitter, QFileDialog, QMessageBox,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
+from ..core import exporter
 from ..widgets.spectrum_viewer import SpectrumViewer
 
 
 class ResultsPanel(QWidget):
     """Display fit results: concentration table, fitted spectrum, export."""
 
+    exported = Signal(str)   # human-readable description of what was written
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._export_data: dict | None = None
         self._build_ui()
 
     def _build_ui(self):
@@ -106,14 +112,26 @@ class ResultsPanel(QWidget):
         components: list[np.ndarray],
         concentrations: list[float],
         component_names: list[str] | None = None,
+        export_data: dict | None = None,
     ):
-        """Populate the results view with fit output."""
+        """Populate the results view with fit output.
+
+        ``export_data`` is the engine's full results dict; it enables the
+        report / figure exports and fills the H-correction column.
+        """
         n = len(concentrations)
         if n == 0:
+            self._export_data = None
             self._table.setRowCount(0)
             self._placeholder.setVisible(True)
             return
         self._placeholder.setVisible(False)
+        self._export_data = export_data or {
+            "ppm": ppm, "experimental": experimental, "total_fit": total_fit,
+            "components": components, "concentrations": concentrations,
+            "component_names": component_names,
+        }
+        hs = self._export_data.get("Hs")
 
         self._table.setRowCount(n)
         positives = [c for c in concentrations if c > 0]
@@ -123,7 +141,8 @@ class ResultsPanel(QWidget):
             self._table.setItem(i, 0, QTableWidgetItem(name))
             self._table.setItem(i, 1, QTableWidgetItem(f"{c*100:.4f}"))
             self._table.setItem(i, 2, QTableWidgetItem(f"{c/c_min:.4f}" if c_min else "—"))
-            self._table.setItem(i, 3, QTableWidgetItem("—"))
+            h_text = f"{hs[i]:.3f}" if hs is not None and i < len(hs) else "—"
+            self._table.setItem(i, 3, QTableWidgetItem(h_text))
 
         # Spectrum plot
         self._viewer.clear()
@@ -151,23 +170,55 @@ class ResultsPanel(QWidget):
                               name="Histogram", color="#66bb6a", width=2)
 
     # ── Export ──────────────────────────────────────────────
+    def _has_results(self) -> bool:
+        if self._export_data is None:
+            QMessageBox.information(self, "Export", "Run a fit first to have something to export.")
+            return False
+        return True
+
+    def _run_export(self, title: str, action):
+        try:
+            message = action()
+        except (exporter.ExportError, OSError, ValueError) as e:
+            QMessageBox.warning(self, title, str(e))
+            return
+        self.exported.emit(message)
+
     def _export_csv(self):
+        if not self._has_results():
+            return
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "results.csv", "CSV (*.csv)")
-        if path:
-            # TODO: write actual data
-            pass
+        if not path:
+            return
+
+        def action():
+            exporter.write_csv(path, self._export_data)
+            stem, ext = os.path.splitext(path)
+            conc = exporter.write_concentrations_csv(f"{stem}-concentrations{ext or '.csv'}", self._export_data)
+            return f"Exported {path} and {conc}"
+
+        self._run_export("Export CSV", action)
 
     def _export_figures(self):
+        if not self._has_results():
+            return
         folder = QFileDialog.getExistingDirectory(self, "Select Export Folder")
-        if folder:
-            # TODO: export pyqtgraph plots as images
-            pass
+        if not folder:
+            return
+
+        def action():
+            files = exporter.save_figures(folder, "fit", self._export_data)
+            return f"Exported {len(files)} figure(s) to {folder}"
+
+        self._run_export("Export Figures", action)
 
     def _export_report(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export Report", "fit_report.txt", "Text (*.txt)")
-        if path:
-            # TODO: write pyihm-style report
-            pass
+        if not self._has_results():
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export Report", "fit_report.out", "pyihm report (*.out);;Text (*.txt)")
+        if not path:
+            return
+        self._run_export("Export Report", lambda: f"Exported {exporter.write_report(path, self._export_data)}")
 
     def update_theme(self, colors: dict):
         self._viewer.update_theme(colors)

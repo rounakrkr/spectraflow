@@ -5,7 +5,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QProgressBar, QSplitter,
-    QTextEdit, QComboBox,
+    QTextEdit, QComboBox, QCheckBox,
 )
 from PySide6.QtCore import Signal, Qt, QTimer
 from PySide6.QtGui import QFont, QTextCursor, QColor
@@ -86,6 +86,16 @@ class FitRunnerPanel(QWidget):
         self._method_combo.setMinimumWidth(100)
         btn_row.addWidget(self._method_combo)
 
+        self._align_chk = QCheckBox("Pre-align peaks")
+        self._align_chk.setChecked(True)
+        self._align_chk.setToolTip("Chemical-shift alignment fit before the main fit (untick = pyihm --noalgn)")
+        btn_row.addWidget(self._align_chk)
+
+        self._autosave_chk = QCheckBox("Save outputs after fit")
+        self._autosave_chk.setChecked(True)
+        self._autosave_chk.setToolTip("Write .out report, -DATA csv and -FIGURES next to the input")
+        btn_row.addWidget(self._autosave_chk)
+
         self._start_btn = QPushButton("▶  Start Fit")
         self._start_btn.setObjectName("primary_btn")
         self._start_btn.setMinimumHeight(44)
@@ -135,6 +145,15 @@ class FitRunnerPanel(QWidget):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter, stretch=1)
+
+    # ── Options ─────────────────────────────────────────────
+    @property
+    def align_enabled(self) -> bool:
+        return self._align_chk.isChecked()
+
+    @property
+    def autosave_enabled(self) -> bool:
+        return self._autosave_chk.isChecked()
 
     # ── Controls ────────────────────────────────────────────
     def _on_start(self):
