@@ -80,3 +80,54 @@ def test_component_folder_skips_cal_copies(qapp, tmp_path, monkeypatch):
     names = [os.path.basename(p) for p in panel._comp_paths]
     # one entry per component; a lone "-cal" file with no plain sibling is kept
     assert sorted(names) == sorted(["bzac.fvf", "dmso.fvf", "EC.fvf", "only-cal-cal.fvf"])
+
+
+# ── tick / untick component files ──────────────────────────────────
+def _panel_with(qapp, names):
+    from app.panels.input_config import InputConfigPanel
+    panel = InputConfigPanel()
+    for n in names:
+        panel._add_comp_path(f"/data/comp/{n}")
+    return panel
+
+
+def test_component_rows_are_ticked_by_default(qapp):
+    from PySide6.QtCore import Qt
+    panel = _panel_with(qapp, ["bzac.fvf", "dmso.fvf", "EC.fvf"])
+    assert all(panel._comp_list.item(i).checkState() == Qt.CheckState.Checked
+               for i in range(3))
+    assert len(panel.get_config()["comp_paths"]) == 3
+    assert panel._comp_summary.text().startswith("3 of 3 selected")
+
+
+def test_unticked_component_is_left_out_of_config(qapp):
+    from PySide6.QtCore import Qt
+    panel = _panel_with(qapp, ["bzac.fvf", "dmso.fvf", "EC.fvf"])
+
+    panel._comp_list.item(1).setCheckState(Qt.CheckState.Unchecked)   # untick dmso
+
+    got = [os.path.basename(p) for p in panel.get_config()["comp_paths"]]
+    assert got == ["bzac.fvf", "EC.fvf"]                  # order preserved
+    assert panel._comp_summary.text().startswith("2 of 3 selected")
+    assert len(panel._comp_paths) == 3                    # still listed, can be re-ticked
+
+    panel._comp_list.item(1).setCheckState(Qt.CheckState.Checked)
+    assert len(panel.get_config()["comp_paths"]) == 3
+
+
+def test_save_config_emits_only_ticked_components(qapp):
+    from PySide6.QtCore import Qt
+    panel = _panel_with(qapp, ["a.fvf", "b.fvf"])
+    panel._comp_list.item(0).setCheckState(Qt.CheckState.Unchecked)
+    got = []
+    panel.config_ready.connect(got.append)
+    panel._save_config()
+    assert [os.path.basename(p) for p in got[0]["comp_paths"]] == ["b.fvf"]
+
+
+def test_adding_same_file_twice_and_clear_all(qapp):
+    panel = _panel_with(qapp, ["a.fvf", "a.fvf"])
+    assert panel._comp_list.count() == 1
+    panel._clear_comps()
+    assert panel._comp_list.count() == 0 and panel._comp_summary.text() == ""
+    assert panel.get_config()["comp_paths"] == []

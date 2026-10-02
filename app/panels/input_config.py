@@ -92,7 +92,12 @@ class InputConfigPanel(QWidget):
         self._comp_list = QListWidget()
         self._comp_list.setMaximumHeight(140)
         self._comp_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._comp_list.itemChanged.connect(lambda _item: self._update_comp_summary())
         root.addWidget(self._comp_list)
+
+        self._comp_summary = QLabel("")
+        self._comp_summary.setObjectName("muted")
+        root.addWidget(self._comp_summary)
 
         # ── Section 3: Processing Options ───────────────────
         root.addWidget(self._section_header("3. Processing Options"))
@@ -197,15 +202,42 @@ class InputConfigPanel(QWidget):
         lbl.setObjectName("subheading")
         return lbl
 
+    def _add_comp_path(self, path: str):
+        """Add one component file to the list, ticked (= used in the fit)."""
+        if path in self._comp_paths:
+            return
+        self._comp_paths.append(path)
+        item = QListWidgetItem(path)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(Qt.CheckState.Checked)
+        self._comp_list.addItem(item)
+        self._update_comp_summary()
+
+    def selected_comp_paths(self) -> list[str]:
+        """Component files that are ticked, in list order."""
+        return [
+            self._comp_list.item(i).text()
+            for i in range(self._comp_list.count())
+            if self._comp_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+
+    def _update_comp_summary(self):
+        total = self._comp_list.count()
+        if total == 0:
+            self._comp_summary.setText("")
+        else:
+            used = len(self.selected_comp_paths())
+            self._comp_summary.setText(
+                f"{used} of {total} selected — untick a file to leave it out of the fit"
+            )
+
     def _add_comp_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Add Component Files", "",
             "Voigt Files (*.fvf);;All Files (*)",
         )
         for p in paths:
-            if p not in self._comp_paths:
-                self._comp_paths.append(p)
-                self._comp_list.addItem(QListWidgetItem(p))
+            self._add_comp_path(p)
 
     def _add_comp_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Components Folder")
@@ -224,20 +256,19 @@ class InputConfigPanel(QWidget):
                 # every component twice.
                 if base.endswith("-cal") and (base[:-4] + ext) in names:
                     continue
-                if full not in self._comp_paths:
-                    self._comp_paths.append(full)
-                    self._comp_list.addItem(QListWidgetItem(full))
+                self._add_comp_path(full)
 
     def _clear_comps(self):
         self._comp_paths.clear()
         self._comp_list.clear()
+        self._update_comp_summary()
 
     def _build_config(self) -> dict:
         """Build the full configuration dict — single source of truth."""
         methods = ["fast", "tight", "custom"]
         return {
             "mix_path": self._mix_browser.get_path(),
-            "comp_paths": list(self._comp_paths),
+            "comp_paths": self.selected_comp_paths(),
             "proc": {
                 "wf": self._wf_combo.currentText().lower(),
                 "zf": self._chk_zf.isChecked(),
