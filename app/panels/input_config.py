@@ -213,10 +213,18 @@ class InputConfigPanel(QWidget):
             import os
             # Only add known NMR / spectrum file types
             valid_exts = {".fvf", ".ft", ".1r", ".fid", ".txt", ".csv", ".dat", ".dx", ".jdx"}
-            for f in sorted(os.listdir(folder)):
+            names = sorted(os.listdir(folder))
+            for f in names:
                 full = os.path.join(folder, f)
-                _, ext = os.path.splitext(f)
-                if os.path.isfile(full) and ext.lower() in valid_exts and full not in self._comp_paths:
+                base, ext = os.path.splitext(f)
+                if not (os.path.isfile(full) and ext.lower() in valid_exts):
+                    continue
+                # "x-cal.fvf" is the calibrated copy of "x.fvf". The engine
+                # switches to it automatically, so listing both would load
+                # every component twice.
+                if base.endswith("-cal") and (base[:-4] + ext) in names:
+                    continue
+                if full not in self._comp_paths:
                     self._comp_paths.append(full)
                     self._comp_list.addItem(QListWidgetItem(full))
 
