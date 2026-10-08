@@ -6,6 +6,10 @@ import threading
 import numpy as np
 from PySide6.QtCore import QThread, Signal, QObject
 
+# One class for the whole app: the engine's workers, FitWorker and the headless
+# runner must all raise/catch the same exception type.
+from app.core.ihm_runner import FitCancelled  # noqa: F401  (re-exported)
+
 
 class WorkerSignals(QObject):
     """Shared signals for all workers."""
@@ -14,10 +18,6 @@ class WorkerSignals(QObject):
     cancelled = Signal()             # stop() honoured before completion
     error = Signal(str)              # error message
     log = Signal(str)                # log message
-
-
-class FitCancelled(Exception):
-    """Raise from a fit function to abort cooperatively."""
 
 
 class FitWorker(QThread):

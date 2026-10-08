@@ -307,6 +307,7 @@ class MainWindow(QMainWindow):
     def _on_regions_confirmed(self, regions: list):
         """When user confirms regions in the region selector panel."""
         self._engine.set_regions(regions)
+        self._peaks.clear()     # peaks were generated for the previous windows
         self._terminal.write_success(f"✅ {len(regions)} fit regions set")
         # Navigate to calibration
         self._navigate("calibration")
