@@ -6,6 +6,8 @@ import threading
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from PySide6.QtCore import QThread, Signal, QObject
 
+from app.core.batch_jobs import init_worker, worker_environ
+
 
 class BatchSignals(QObject):
     """Signals emitted by the batch processor."""
@@ -34,7 +36,11 @@ class BatchProcessor(QThread):
         self._cancel = threading.Event()
 
     def configure(self, input_files: list[str], fit_fn=None, n_workers: int | None = None):
-        """Set up the batch before calling start()."""
+        """Set up the batch before calling start().
+
+        Each item of ``input_files`` is passed to ``fit_fn`` as-is: a path, or
+        any picklable job object (see :class:`app.core.batch_jobs.BatchJob`).
+        """
         self._input_files = list(input_files)
         self._fit_fn = fit_fn
         self._n_workers = n_workers or max(1, (os.cpu_count() or 4) - 1)
@@ -69,31 +75,34 @@ class BatchProcessor(QThread):
             f"Starting batch: {total} jobs on {self._n_workers} workers."
         )
 
-        pending: dict = {}
-        pool = ProcessPoolExecutor(max_workers=self._n_workers)
-        try:
-            pending = {pool.submit(self._fit_fn, path): idx
-                       for idx, path in enumerate(self._input_files)}
-            while pending:
-                if self._cancel.is_set():
-                    break
-                done, _ = wait(list(pending), timeout=0.2, return_when=FIRST_COMPLETED)
-                for future in done:
-                    idx = pending.pop(future)
-                    try:
-                        res = future.result()
-                        results[idx] = res
-                        self.signals.job_completed.emit(idx, res)
-                    except Exception as e:
-                        failed += 1
-                        self.signals.error.emit(idx, str(e))
-                    completed += 1
-                    self.signals.progress.emit(completed, total)
-        except Exception as e:
-            self.signals.log.emit(f"Batch error: {e}")
-        finally:
-            cancelled = self._cancel.is_set() and bool(pending)
-            pool.shutdown(wait=not cancelled, cancel_futures=True)
+        with worker_environ():
+            pending: dict = {}
+            pool = ProcessPoolExecutor(
+                max_workers=self._n_workers, initializer=init_worker
+            )
+            try:
+                pending = {pool.submit(self._fit_fn, path): idx
+                           for idx, path in enumerate(self._input_files)}
+                while pending:
+                    if self._cancel.is_set():
+                        break
+                    done, _ = wait(list(pending), timeout=0.2, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        idx = pending.pop(future)
+                        try:
+                            res = future.result()
+                            results[idx] = res
+                            self.signals.job_completed.emit(idx, res)
+                        except Exception as e:
+                            failed += 1
+                            self.signals.error.emit(idx, str(e))
+                        completed += 1
+                        self.signals.progress.emit(completed, total)
+            except Exception as e:
+                self.signals.log.emit(f"Batch error: {e}")
+            finally:
+                cancelled = self._cancel.is_set() and bool(pending)
+                pool.shutdown(wait=not cancelled, cancel_futures=True)
 
         if cancelled:
             self.signals.log.emit(
