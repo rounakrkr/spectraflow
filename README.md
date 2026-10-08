@@ -17,7 +17,7 @@ A beautiful, modern desktop application for NMR mixture deconvolution using Indi
 - 📈 **Results panel** — concentration table, fitted spectrum, residuals
 - 💻 **Embedded terminal** with custom commands
 - 🪟 **Windows 11 Mica/Acrylic** glass effect support
-- ⚡ **Batch processing** — *planned*: the parallel `BatchProcessor` exists but is not yet wired into the GUI
+- ⚡ **Batch processing** — run one template `.inp` over a folder of mixtures (or many `.inp` files) in parallel, with per-job status, auto-saved outputs and a summary CSV
 
 ## Tech Stack
 
@@ -77,12 +77,15 @@ spectraflow/
 │   │   ├── calibration_panel.py # Drift/intensity calibration
 │   │   ├── peak_editor.py     # Peak parameter editor
 │   │   ├── fit_runner.py      # Fit execution + monitoring
-│   │   └── results_panel.py   # Results display + export
+│   │   ├── results_panel.py   # Results display + export
+│   │   └── batch_panel.py     # Batch queue, progress, summary CSV
 │   └── core/
 │       ├── engine.py          # AnalysisEngine: wraps the pyihm workflow (load → fit → results)
 │       ├── exporter.py        # CSV / report / figure / convergence exports
 │       ├── workers.py         # FitWorker, SpectrumLoadWorker, FitCancelled
-│       ├── batch_processor.py # Parallel batch runner (not yet wired into the GUI)
+│       ├── ihm_runner.py      # Qt-free IHM pipeline + run_ihm() used by the engine and batch workers
+│       ├── batch_jobs.py      # Batch job building, mixture discovery, worker entry point
+│       ├── batch_processor.py # Parallel batch runner (process pool, cancel, per-job errors)
 │       └── pipeline.py        # Workflow step tracker (currently unused)
 └── tests/                     # pytest suite, incl. test_e2e_fit.py (real, unmocked fit)
 ```
