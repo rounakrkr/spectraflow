@@ -24,6 +24,7 @@ class Sidebar(QWidget):
         ("peaks",       "✏", "Peak Editor"),
         ("fit",         "⚡", "Fit Runner"),
         ("results",     "📊", "Results"),
+        ("batch",       "🗂", "Batch"),
     ]
 
     BOTTOM_ITEMS = [

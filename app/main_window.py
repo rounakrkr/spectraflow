@@ -23,6 +23,7 @@ from .panels.calibration_panel import CalibrationPanel
 from .panels.peak_editor import PeakEditorPanel
 from .panels.fit_runner import FitRunnerPanel
 from .panels.results_panel import ResultsPanel
+from .panels.batch_panel import BatchPanel
 
 
 class MainWindow(QMainWindow):
@@ -73,6 +74,7 @@ class MainWindow(QMainWindow):
         self._peaks = PeakEditorPanel()
         self._fit_runner = FitRunnerPanel()
         self._results = ResultsPanel()
+        self._batch = BatchPanel()
         self._terminal_panel = self._make_terminal_panel()
 
         panel_map = [
@@ -84,6 +86,7 @@ class MainWindow(QMainWindow):
             ("peaks", self._peaks),
             ("fit", self._fit_runner),
             ("results", self._results),
+            ("batch", self._batch),
             ("terminal", self._terminal_panel),
         ]
 
@@ -131,6 +134,12 @@ class MainWindow(QMainWindow):
         # Input config → engine
         self._input_config.config_ready.connect(self._on_config_ready)
         self._input_config.input_file_loaded.connect(self._engine.load_input_file)
+        self._input_config.input_file_loaded.connect(self._batch.set_template)
+
+        # Batch panel → terminal
+        self._batch.log.connect(lambda msg: self._terminal.write(msg, "#8ea2c0"))
+        self._batch.error.connect(self._terminal.write_error)
+        self._batch.exported.connect(lambda msg: self._terminal.write_success(f"✅ {msg}"))
 
     def _connect_engine(self):
         """Wire AnalysisEngine signals to panels for live data flow."""
@@ -307,6 +316,7 @@ class MainWindow(QMainWindow):
     def _on_regions_confirmed(self, regions: list):
         """When user confirms regions in the region selector panel."""
         self._engine.set_regions(regions)
+        self._peaks.clear()     # peaks were generated for the previous windows
         self._terminal.write_success(f"✅ {len(regions)} fit regions set")
         # Navigate to calibration
         self._navigate("calibration")
@@ -440,6 +450,7 @@ class MainWindow(QMainWindow):
         "peaks": "Peak Editor",
         "fit": "Fit Runner",
         "results": "Results",
+        "batch": "Batch Processing",
         "terminal": "Terminal",
     }
 
@@ -450,6 +461,10 @@ class MainWindow(QMainWindow):
             self._sidebar.set_active(name)
             display = self._PANEL_NAMES.get(name, name.replace('_', ' ').title())
             self._status_label.setText(f"  {display}")
+
+    def closeEvent(self, event):
+        self._batch.shutdown()
+        super().closeEvent(event)
 
     # ── Theme ───────────────────────────────────────────────
     def _toggle_theme(self):

@@ -11,3 +11,4 @@ matplotlib>=3.7.0
 # Or as editable installs from local clones:
 #   pip install -e ../klassez
 #   pip install --no-deps -e ../pyihm
+threadpoolctl>=3.1

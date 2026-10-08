@@ -21,76 +21,24 @@ FIX LOG (v2):
 """
 
 import os
-import re
 import threading
 import traceback
 
 import numpy as np
 import klassez as kz
-import lmfit as l
 
 from PySide6.QtCore import QObject, Signal, QThread
 
-from app.core.workers import FitCancelled
+from app.core import ihm_runner as ihm
+# The pipeline helpers moved to the Qt-free ``ihm_runner`` (shared with the
+# batch workers); they stay importable from here.
+from app.core.ihm_runner import (  # noqa: F401
+    FitCancelled, is_intensity_param, resolve_input_path, read_input_file_resolved,
+)
 
-# pyihm imports — the library stays unchanged
-import pyihm.input_reading as pyihm_input
-import pyihm.spectra_reading as pyihm_spectra
-import pyihm.gen_param as pyihm_gen
-import pyihm.fit_mixture as pyihm_fit
-
-
-# pyihm names each component's intensity parameter ``S<n>_I`` (see
-# pyihm.gen_param.main); every other fit parameter is u/s/k/b/U/o.
-_INTENSITY_RE = re.compile(r"S\d+_I")
-
-
-def is_intensity_param(name: str) -> bool:
-    """True for a component-intensity parameter (``S1_I``, ``S2_I``, ...)."""
-    return _INTENSITY_RE.fullmatch(name) is not None
-
-
-# ── Helper: resolve paths from a pyihm input file ──────────────────
-def resolve_input_path(p, base_dir):
-    """Resolve a path written in a pyihm input file.
-
-    pyihm itself resolves relative paths against the current working
-    directory. A GUI is usually started from somewhere else, so relative
-    paths are resolved against the folder of the input file instead
-    (falling back to the working directory if only that location exists).
-    """
-    p = str(p).strip()
-    if os.path.isabs(p):
-        return os.path.normpath(p)
-    candidate = os.path.normpath(os.path.join(base_dir, p))
-    if not os.path.exists(candidate) and os.path.exists(p):
-        return os.path.abspath(p)
-    return candidate
-
-
-def read_input_file_resolved(path):
-    """Parse a pyihm input file and return its settings as a dict,
-    with every file path made absolute (see :func:`resolve_input_path`)."""
-    ret = pyihm_input.read_input(path)
-    (filename, mix_path, mix_kws, mix_txtf, proc_opt,
-     comp_path, lims, bds, fit_kws, plt_opt, Hs, I0) = ret
-
-    base = os.path.dirname(os.path.abspath(path))
-    return {
-        "filename": filename,
-        "out_root": resolve_input_path(filename, base),
-        "plt_opt": dict(plt_opt),
-        "mix_path": resolve_input_path(mix_path, base),
-        "mix_kws": mix_kws,
-        "mix_txtf": resolve_input_path(mix_txtf, base) if mix_txtf else mix_txtf,
-        "proc_opt": proc_opt,
-        "comp_path": [resolve_input_path(c, base) for c in comp_path],
-        "lims": lims,
-        "bds": bds,
-        "fit_kws": fit_kws,
-        "Hs": Hs,
-        "I0": I0,
-    }
+# Callers/tests patch pyihm through ``engine.pyihm_fit``. It is the very module
+# object ``ihm_runner`` calls, so a patch made here reaches the fit as well.
+pyihm_fit = ihm.pyihm_fit
 
 
 # ── Helper: Background worker ──────────────────────────────────────
@@ -175,6 +123,9 @@ class AnalysisEngine(QObject):
             "opt_spectra": None,      # list[ndarray] — optimized component spectra
             "opt_total": None,        # ndarray — total fit
             "mix_path": None,         # str — mixture spectrum location (for the report)
+            "mix_kws": {},            # dict — kwargs the mixture was loaded with
+            "proc_opt": None,         # dict — processing options the mixture was loaded with
+            "mix_txtf": None,         # str — text spectrum that replaced the mixture, if any
             "out_root": None,         # str — output root from the input file (no extension)
             "plt_opt": {},            # dict — figure format / dpi from the input file
             "drifts": [],             # list[float] — chemical-shift drift applied per component
@@ -221,43 +172,26 @@ class AnalysisEngine(QObject):
 
     # ── Step 1: Load mixture ───────────────────────────────
     def load_mixture(self, path: str, mix_kws: dict | None = None,
-                     proc_opt: dict | None = None):
+                     proc_opt: dict | None = None, mix_txtf: str | None = None):
         """Load the mixture spectrum from a Bruker/NMR directory.
+
+        With ``mix_txtf`` the spectrum is replaced by the complex array stored
+        in that text file (pyihm's ``mix_txtf``); the directory still supplies
+        the acquisition parameters.
 
         Runs in background thread. Emits mixture_loaded(ppm, data) on success.
         """
         self.log.emit(f"Loading mixture from {path}...")
 
         def _do_load():
-            kws = mix_kws or {}
-            M = kz.Spectrum_1D(path, **kws)
-
-            # Processing options (pyihm default: all off)
-            if proc_opt:
-                wf = proc_opt.get("wf", {})
-                if isinstance(wf, dict) and wf.get("mode", "no") != "no":
-                    for key, value in wf.items():
-                        M.procs[key] = value
-                if proc_opt.get("zf"):
-                    M.procs["zf"] = proc_opt["zf"]
-                if proc_opt.get("blp"):
-                    if isinstance(proc_opt["blp"], dict):
-                        M.blp(**proc_opt["blp"])
-                    else:
-                        M.blp()
-
-            M.process()
-
-            if proc_opt and proc_opt.get("pknl"):
-                M.pknl()
-            if proc_opt and proc_opt.get("adjph"):
-                M.adjph()
-
-            return M
+            return ihm.load_mixture(path, mix_kws, proc_opt, mix_txtf)
 
         def _on_done(M):
             self._state["M"] = M
             self._state["mix_path"] = path
+            self._state["mix_kws"] = dict(mix_kws or {})
+            self._state["proc_opt"] = proc_opt
+            self._state["mix_txtf"] = mix_txtf
             self._state["acqus"] = dict(M.acqus)
             self._state["ppm"] = M.ppm
             self._state["exp"] = np.copy(M.r)
@@ -325,33 +259,13 @@ class AnalysisEngine(QObject):
                           "Mole fractions may be inaccurate.")
 
         # FIX #5: probe for -cal.fvf files
-        actual_paths = []
-        for path in comp_paths:
-            base, ext = path.rsplit(".", 1) if "." in path else (path, "")
-            cal_path = f"{base}-cal.{ext}"
-            if os.path.isfile(cal_path):
-                actual_paths.append(cal_path)
-                self.log.emit(f"Using calibrated: {os.path.basename(cal_path)}")
-            else:
-                actual_paths.append(path)
+        actual_paths = ihm.resolve_calibrated_paths(comp_paths)
+        for orig, actual in zip(comp_paths, actual_paths):
+            if actual != orig:
+                self.log.emit(f"Using calibrated: {os.path.basename(actual)}")
 
         def _do_load():
-            comp_peaks = []
-            components = []
-            comp_names = []
-
-            for k, path in enumerate(actual_paths):
-                peaks_dict, _I = pyihm_spectra.get_component_spectrum(
-                    path, acqus, return_dict=True, norm=use_Hs[k], N=N
-                )
-                spectrum, _ = pyihm_spectra.get_component_spectrum(
-                    path, acqus, return_dict=False, norm=use_Hs[k], N=N
-                )
-                comp_peaks.append(peaks_dict)
-                components.append(spectrum)
-                comp_names.append(os.path.splitext(os.path.basename(path))[0])
-
-            return comp_peaks, components, comp_names
+            return ihm.load_component_set(actual_paths, acqus, N, use_Hs)
 
         def _on_done(result):
             comp_peaks, components, comp_names = result
@@ -364,7 +278,7 @@ class AnalysisEngine(QObject):
 
             # Compute initial intensity correction
             M = self._state["M"]
-            I = kz.processing.integrate(M.r, x=M.freq) / (acqus["SW"] / 2) / np.sum(use_Hs)
+            I = ihm.intensity_correction(M, acqus, use_Hs)
             self._state["I"] = I
 
             # FIX #4: only set I0 to defaults if not already populated
@@ -388,8 +302,14 @@ class AnalysisEngine(QObject):
         (after calibration is done).
         """
         # Ensure left > right (NMR convention: high ppm = left)
-        lims = [(max(r), min(r)) for r in regions]
+        lims = ihm.normalize_windows(regions)
         self._state["lims"] = lims
+        # Parameters and peaks were built for the previous windows; keeping them
+        # would fit new windows with peaks selected for the old ones.
+        self._state["param"] = None
+        self._state["c_idx"] = None
+        self._state["clean_Hs"] = None
+        self._state["peak_table"] = []
         self.log.emit(f"Fit regions set: {len(lims)} windows")
         self.regions_set.emit(lims)
 
@@ -399,8 +319,7 @@ class AnalysisEngine(QObject):
 
         Expected keys: utol, utol_sg, stol, ktol
         """
-        defaults = {"utol": 0.2, "utol_sg": 0.1, "stol": 10, "ktol": 0.01}
-        for key, val in defaults.items():
+        for key, val in ihm.DEFAULT_BOUNDS.items():
             if key not in bds:
                 bds[key] = val
         self._state["bds"] = bds
@@ -433,65 +352,9 @@ class AnalysisEngine(QObject):
         comp_names = list(self._state["comp_names"])
 
         def _do_gen():
-            acqus = dict(M.acqus)
-
-            # Helper: check if chemical shift is within fit regions
-            def is_in(x, Bs):
-                for B in Bs:
-                    if min(B) <= x <= max(B):
-                        return True
-                return False
-
-            # Filter peaks to only those within fit regions
-            comp_peaks_in = [{} for _ in comp_peaks]
-            components = []
-            hs_filtered = list(Hs)
-
-            for k, dic_Peaks in enumerate(comp_peaks):
-                for key, peak in dic_Peaks.items():
-                    if is_in(peak.u, lims):
-                        peak.idx = key
-                        comp_peaks_in[k][key] = peak
-                if len(comp_peaks_in[k]) == 0:
-                    components.append("Q")
-                else:
-                    components.append(
-                        pyihm_spectra.Spectr(acqus, *[p for _, p in comp_peaks_in[k].items()])
-                    )
-                # Correct Hs to only count peaks inside fit windows
-                Hs_in = np.sum([peak.k for _, peak in comp_peaks_in[k].items()])
-                hs_filtered[k] = round(Hs_in, 5)
-
-            # Remove components with no peaks in range
-            missing = [i for i, h in enumerate(hs_filtered) if h == 0]
-            c_idx = [i for i in range(len(hs_filtered)) if i not in missing]
-
-            clean_components = [c for c in components if c != "Q"]
-            clean_Hs = [h for h in hs_filtered if h != 0]
-            clean_I0 = [I0[k] for k in c_idx] if I0 else [1.0] * len(clean_components)
-
-            if missing:
-                names = [str(m + 1) for m in missing]
-                self.log.emit(f"⚠ Component(s) {', '.join(names)} have no peaks in fit windows")
-
-            # Generate parameters
-            param = pyihm_gen.main(M, clean_components, bds, lims, clean_Hs, c_idx, clean_I0)
-
-            # Editable peak table: one row per peak that is actually fitted.
-            # "key"/"idx" locate the lmfit parameters (S<n>_u<idx>, ...).
-            peak_table = []
-            for k in c_idx:
-                name = comp_names[k] if k < len(comp_names) else f"component {k + 1}"
-                for pk_idx, peak in comp_peaks_in[k].items():
-                    peak_table.append({
-                        "u": float(peak.u), "fwhm": float(peak.fwhm), "k": float(peak.k),
-                        "b": float(peak.b), "phi": float(peak.phi),
-                        "group": int(peak.group), "group0": int(peak.group),
-                        "comp": k + 1, "key": f"S{k + 1}_", "idx": pk_idx,
-                        "label": f"{name} · peak {pk_idx}",
-                    })
-
-            return param, clean_components, clean_Hs, c_idx, peak_table
+            return ihm.build_parameters(
+                M, comp_peaks, bds, lims, Hs, I0, comp_names, log=self.log.emit
+            )
 
         def _on_done(result):
             param, components, clean_Hs, c_idx, peak_table = result
@@ -534,109 +397,20 @@ class AnalysisEngine(QObject):
         self._cancel = threading.Event()
         self.log.emit(f"Starting fit (method={method})...")
 
-        acqus = dict(M.acqus)
-        acqus["freq"] = M.freq
-        N = M.r.shape[-1]
-        N_spectra = len([k for k in param if is_intensity_param(k)])
-        exp = np.copy(M.r)
-
-        # Convert ppm limits to slices
-        pts = [tuple([kz.misc.ppmfind(M.ppm, lim)[0] for lim in X]) for X in lims]
-        plims = [slice(min(W), max(W)) for W in pts]
-        exp_T = np.concatenate([exp[w] for w in plims])
-
+        ctx = ihm.prepare_fit(M, param, lims)
         cancel_event = self._cancel  # local ref for closure
-        history: list[tuple[int, float]] = []
+
+        def _on_progress(count, target):
+            # Emit progress every 5 iterations
+            if count % 5 == 0:
+                self.fit_progress.emit(count, target)
 
         def _do_fit():
-            # `param` is re-bound by pre_alignment below; without this it
-            # becomes a local and the read just after raises UnboundLocalError.
-            nonlocal param
-            # Add iteration counter
-            if "count" in param:
-                param["count"].set(value=0)
-            else:
-                param.add("count", value=0, vary=False)
-
-            # Custom f2min that emits progress signal and supports cancellation
-            def f2min_gui(param, N_spectra, acqus, N, exp, I, plims):
-                # FIX #6: cooperative cancellation
-                if cancel_event.is_set():
-                    raise FitCancelled("Fit cancelled by user")
-
-                param["count"].value += 1
-                count = int(param["count"].value)
-
-                spectra = pyihm_fit.calc_spectra(param, N_spectra, acqus, N)
-                spectra_T = [np.concatenate([s[w] for w in plims]) for s in spectra]
-                total = np.sum(spectra_T, axis=0)
-                residual = exp / I - total
-                target = np.sum(residual**2) / len(residual)
-
-                history.append((count, float(target)))
-
-                # Emit progress every 5 iterations
-                if count % 5 == 0:
-                    self.fit_progress.emit(count, target)
-
-                return residual
-
-            # FIX #5: pre-alignment (pyihm default, skipped with align=False)
-            if align:
-                self.log.emit("Running pre-alignment...")
-                try:
-                    param = pyihm_fit.pre_alignment(
-                        exp, acqus, N_spectra, N, plims, param, False
-                    )
-                    param["count"].set(value=0)
-                    self.log.emit("Pre-alignment done.")
-                except Exception as e:
-                    self.log.emit(f"⚠ Pre-alignment skipped: {e}")
-            else:
-                self.log.emit("Pre-alignment skipped (disabled).")
-            history.clear()
-
-            minner = l.Minimizer(
-                f2min_gui, param,
-                fcn_args=(N_spectra, acqus, N, exp_T, I, plims),
+            return ihm.minimize(
+                ctx, param, I, method=method, align=align, fit_kws=fit_kws,
+                should_cancel=cancel_event.is_set,
+                on_progress=_on_progress, log=self.log.emit,
             )
-
-            if method == "fast":
-                result = minner.minimize(
-                    method="leastsq", max_nfev=15000,
-                    xtol=1e-8, ftol=1e-8, gtol=1e-8,
-                )
-            elif method == "tight":
-                result = minner.minimize(method="Nelder", max_nfev=10000)
-                if cancel_event.is_set():
-                    raise FitCancelled("Fit cancelled by user")
-                result = minner.minimize(
-                    method="leastsq", params=result.params,
-                    max_nfev=10000, xtol=1e-8, ftol=1e-8, gtol=1e-8,
-                )
-            elif method == "custom" and fit_kws:
-                # FIX #3: honour fit_kws from input file
-                for idx in range(len(fit_kws.keys())):
-                    if cancel_event.is_set():
-                        raise FitCancelled("Fit cancelled by user")
-                    kws = dict(fit_kws[idx])
-                    if kws.get("method") == "leastsq":
-                        tol = kws.pop("tol", 1e-5)
-                        kws["xtol"] = tol
-                        kws["ftol"] = tol
-                        kws["gtol"] = tol
-                    self.log.emit(f"Fit round {idx+1}/{len(fit_kws)}: {kws.get('method','leastsq')}")
-                    if idx != 0:
-                        kws["params"] = result.params
-                    result = minner.minimize(**kws)
-            else:
-                # fallback: leastsq
-                result = minner.minimize(
-                    method="leastsq", max_nfev=15000,
-                    xtol=1e-8, ftol=1e-8, gtol=1e-8,
-                )
-
-            return result
 
         def _on_cancel():
             if cancel_event is not self._cancel:
@@ -644,65 +418,25 @@ class AnalysisEngine(QObject):
             self.log.emit("Fit cancelled.")
             self.fit_cancelled.emit()
 
-        def _on_done(result):
+        def _on_done(outcome):
+            result, history = outcome
             if cancel_event.is_set():       # Stop arrived just as the fit finished
                 _on_cancel()
                 return
-            popt = result.params
-            # Calculate optimized spectra
-            opt_spectra = pyihm_fit.calc_spectra(popt, N_spectra, acqus, N)
-            opt_spectra_obj = pyihm_fit.calc_spectra_obj(popt, N_spectra, acqus, N)
-            opt_total = np.sum(opt_spectra, axis=0)
-
-            # Get concentrations
-            Hf = np.array([np.sum([p.k for p in peaks]) for peaks in opt_spectra_obj])
-            concentrations = np.array([
-                f for key, f in popt.valuesdict().items() if is_intensity_param(key)
-            ])
-            # FIX #2: use clean_Hs (corrected for fit windows), not nominal Hs
-            c_idx = self._state["c_idx"]
-            clean_Hs = self._state.get("clean_Hs")
-            if clean_Hs and len(clean_Hs) == len(concentrations):
-                Hs_used = np.array(clean_Hs)
-            elif c_idx:
-                Hs_used = np.array([self._state["Hs"][i] for i in c_idx])
-            else:
-                Hs_used = np.array(self._state["Hs"])
-
-            KH = Hf / Hs_used
-            concentrations *= KH
-            for peaks, kh in zip(opt_spectra_obj, KH):
-                for peak in peaks:
-                    peak.k /= kh
-            c_norm, I_corr = kz.misc.molfrac(concentrations)
+            results_dict, opt_spectra, opt_total, c_norm = ihm.assemble_results(
+                M, ctx, result, I, history,
+                c_idx=self._state["c_idx"],
+                clean_Hs=self._state.get("clean_Hs"),
+                Hs=self._state["Hs"],
+                comp_names=self._state["comp_names"],
+                lims=lims,
+                mix_path=self._state.get("mix_path"),
+            )
 
             self._state["result"] = result
             self._state["opt_spectra"] = opt_spectra
             self._state["opt_total"] = opt_total
             self._state["concentrations"] = c_norm
-
-            results_dict = {
-                "ppm": M.ppm,
-                "experimental": exp,
-                "total_fit": I * opt_total,
-                "components": [I * s for s in opt_spectra],
-                "concentrations": list(c_norm),
-                "component_names": (
-                    [self._state["comp_names"][i] for i in c_idx]
-                    if c_idx else self._state["comp_names"]
-                ),
-                "I": I * I_corr,
-                "nfev": result.nfev,
-                "message": result.message,
-                "Hs": [float(h) for h in Hs_used],
-                "peaks": [list(peaks) for peaks in opt_spectra_obj],
-                "component_idx": self._component_numbers(popt, len(c_norm)),
-                "lims": [tuple(w) for w in lims],
-                "plims": plims,
-                "mixture_path": self._state.get("mix_path"),
-                "x_label": self._x_label(acqus),
-                "convergence": list(history),
-            }
             self._state["results"] = results_dict
 
             self.log.emit(f"Fit complete: {result.nfev} evaluations")
@@ -713,17 +447,11 @@ class AnalysisEngine(QObject):
     @staticmethod
     def _component_numbers(popt, n: int) -> list[int]:
         """1-based component numbers from the ``S<n>_I`` parameter names."""
-        try:
-            return [int(k.split("_")[0].replace("S", "")) for k in popt if is_intensity_param(k)]
-        except ValueError:
-            return list(range(1, n + 1))
+        return ihm.component_numbers(popt, n)
 
     @staticmethod
     def _x_label(acqus) -> str | None:
-        try:
-            return r"$\delta\ $" + kz.misc.nuc_format(acqus["nuc"]) + r" /ppm"
-        except Exception:
-            return None
+        return ihm.x_label(acqus)
 
     def apply_peak_edits(self, peaks: list[dict]) -> dict:
         """Write edited peak values back into the fit's starting parameters.
@@ -823,20 +551,24 @@ class AnalysisEngine(QObject):
             self._state["plt_opt"] = parsed["plt_opt"]
 
             if parsed["lims"]:
-                self._state["lims"] = [(max(r), min(r)) for r in parsed["lims"]]
+                self._state["lims"] = ihm.normalize_windows(parsed["lims"])
 
             self.log.emit("Input file parsed. Loading mixture spectrum...")
 
-            # FIX #3: handle mix_txtf (text file fallback for mixture)
-            if parsed["mix_txtf"] and os.path.isfile(str(parsed["mix_txtf"])):
-                self.log.emit(f"Using text spectrum: {parsed['mix_txtf']}")
-                self.load_mixture_txt(parsed["mix_txtf"])
-            else:
-                self.load_mixture(
-                    parsed["mix_path"],
-                    mix_kws=parsed["mix_kws"],
-                    proc_opt=parsed["proc_opt"],
-                )
+            # mix_txtf: pyihm replaces the processed spectrum with the complex
+            # array in this text file (the dataset still supplies acqus)
+            txtf = parsed["mix_txtf"] or None
+            if txtf and not os.path.isfile(str(txtf)):
+                self.error.emit("load_input_file", f"mix_txtf file not found: {txtf}")
+                return
+            if txtf:
+                self.log.emit(f"Using text spectrum: {txtf}")
+            self.load_mixture(
+                parsed["mix_path"],
+                mix_kws=parsed["mix_kws"],
+                proc_opt=parsed["proc_opt"],
+                mix_txtf=txtf,
+            )
 
         self._run_worker(_do_load, _on_done, "load_input_file")
 
@@ -897,8 +629,7 @@ class AnalysisEngine(QObject):
 
     @property
     def figure_options(self) -> dict:
-        opt = self._state["plt_opt"] or {}
-        return {"ext": opt.get("ext", "png"), "dpi": opt.get("dpi", 300)}
+        return ihm.figure_options(self._state["plt_opt"])
 
     def set_initial_concentration(self, comp_idx: int, value: float):
         """Set the initial guess for a component's concentration."""

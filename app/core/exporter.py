@@ -8,6 +8,7 @@ For an output root ``<dir>/<name>`` the layout is::
     <dir>/<name>-FIGURES/<name>_*.<ext>
 """
 
+import csv
 import getpass
 import os
 from datetime import datetime
@@ -181,3 +182,32 @@ def save_all(root: str, results: dict, ext: str = DEFAULT_EXT, dpi: int = DEFAUL
         out["convergence"] = write_convergence(os.path.join(data_dir, f"{name}.cnvg"), r["convergence"])
     out["figures"] = save_figures(fig_dir, name, r, ext=ext, dpi=dpi)
     return out
+
+
+def write_batch_summary(path: str, rows: list[dict]) -> str:
+    """Write one line per mixture and one column per component (mole fraction, %).
+
+    Each row dict carries ``label``, ``status`` and, for finished fits,
+    ``component_names``, ``concentrations`` (fractions), ``nfev``, ``elapsed``
+    and ``message``. Failed rows keep their status and message with empty cells.
+    """
+    names: list[str] = []
+    for row in rows:
+        for name in row.get("component_names") or []:
+            if name not in names:
+                names.append(name)
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Mixture", "Status"] + [f"{n} (%)" for n in names]
+                   + ["nfev", "Elapsed_s", "Message"])
+        for row in rows:
+            conc = dict(zip(row.get("component_names") or [], row.get("concentrations") or []))
+            elapsed = row.get("elapsed")
+            w.writerow(
+                [row.get("label", ""), row.get("status", "")]
+                + [f"{conc[n] * 100:.5f}" if n in conc else "" for n in names]
+                + [row.get("nfev", ""), f"{elapsed:.2f}" if elapsed is not None else "",
+                   row.get("message", "")]
+            )
+    return path
