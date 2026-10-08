@@ -302,7 +302,7 @@ class AnalysisEngine(QObject):
         (after calibration is done).
         """
         # Ensure left > right (NMR convention: high ppm = left)
-        lims = [(max(r), min(r)) for r in regions]
+        lims = ihm.normalize_windows(regions)
         self._state["lims"] = lims
         # Parameters and peaks were built for the previous windows; keeping them
         # would fit new windows with peaks selected for the old ones.
@@ -319,8 +319,7 @@ class AnalysisEngine(QObject):
 
         Expected keys: utol, utol_sg, stol, ktol
         """
-        defaults = {"utol": 0.2, "utol_sg": 0.1, "stol": 10, "ktol": 0.01}
-        for key, val in defaults.items():
+        for key, val in ihm.DEFAULT_BOUNDS.items():
             if key not in bds:
                 bds[key] = val
         self._state["bds"] = bds
@@ -552,7 +551,7 @@ class AnalysisEngine(QObject):
             self._state["plt_opt"] = parsed["plt_opt"]
 
             if parsed["lims"]:
-                self._state["lims"] = [(max(r), min(r)) for r in parsed["lims"]]
+                self._state["lims"] = ihm.normalize_windows(parsed["lims"])
 
             self.log.emit("Input file parsed. Loading mixture spectrum...")
 
@@ -630,8 +629,7 @@ class AnalysisEngine(QObject):
 
     @property
     def figure_options(self) -> dict:
-        opt = self._state["plt_opt"] or {}
-        return {"ext": opt.get("ext", "png"), "dpi": opt.get("dpi", 300)}
+        return ihm.figure_options(self._state["plt_opt"])
 
     def set_initial_concentration(self, comp_idx: int, value: float):
         """Set the initial guess for a component's concentration."""

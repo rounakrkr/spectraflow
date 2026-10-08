@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -49,6 +50,28 @@ _INTENSITY_RE = re.compile(r"S\d+_I")
 def is_intensity_param(name: str) -> bool:
     """True for a component-intensity parameter (``S1_I``, ``S2_I``, ...)."""
     return _INTENSITY_RE.fullmatch(name) is not None
+
+
+DEFAULT_BOUNDS = {"utol": 0.2, "utol_sg": 0.1, "stol": 10, "ktol": 0.01}
+
+
+def with_default_bounds(bds: dict | None) -> dict:
+    """``bds`` with every missing tolerance filled in from :data:`DEFAULT_BOUNDS`."""
+    out = dict(bds or {})
+    for key, value in DEFAULT_BOUNDS.items():
+        out.setdefault(key, value)
+    return out
+
+
+def figure_options(plt_opt: dict | None) -> dict:
+    """Figure ``ext``/``dpi`` for the exporter from an input file's plot options."""
+    opt = plt_opt or {}
+    return {"ext": opt.get("ext", "png"), "dpi": opt.get("dpi", 300)}
+
+
+def normalize_windows(lims) -> list[tuple]:
+    """Fit windows as ``(left, right)`` pairs with the high-ppm edge first."""
+    return [(max(r), min(r)) for r in lims]
 
 
 # ── Input files ────────────────────────────────────────────────────
@@ -449,3 +472,109 @@ def assemble_results(M, ctx: FitContext, result, I, history, *, c_idx, clean_Hs,
         "convergence": list(history),
     }
     return results, opt_spectra, opt_total, c_norm
+
+
+# ── Whole run, headless ────────────────────────────────────────────
+OVERRIDE_KEYS = frozenset({
+    "mix_path", "mix_kws", "mix_txtf", "proc_opt", "comp_path",
+    "lims", "bds", "fit_kws", "Hs", "I0",
+})
+
+
+def run_ihm(inp_path: str, *, method: str = "tight", align: bool = True,
+            out_root: str | None = None, overrides: dict | None = None,
+            save: bool = True, use_calibrated: bool = True,
+            should_cancel: Callable[[], bool] | None = None,
+            on_progress: Callable[[int, float], None] | None = None,
+            log: LogFn = _nolog) -> dict:
+    """Run one complete IHM analysis from a pyihm input file, with no Qt.
+
+    ``overrides`` replaces settings read from the input file (keys in
+    :data:`OVERRIDE_KEYS`); overriding ``mix_path`` also drops the file's
+    ``mix_txtf``, which belongs to the original mixture, unless ``mix_txtf``
+    is overridden too. This is how one template input is applied to many
+    mixtures. Component files are never written, so concurrent runs sharing
+    a template cannot race.
+
+    Outputs go to ``out_root`` (default: the input file's own root, or the
+    overriding mixture's name next to it) through ``exporter.save_all``.
+    Returns a small picklable summary — never the full results dict.
+    """
+    overrides = dict(overrides or {})
+    unknown = set(overrides) - OVERRIDE_KEYS
+    if unknown:
+        raise ValueError(f"Unknown override(s): {', '.join(sorted(unknown))}")
+
+    t0 = time.perf_counter()
+    cfg = read_input_file_resolved(inp_path)
+    if "mix_path" in overrides:
+        cfg["mix_txtf"] = None
+        overrides["mix_path"] = os.path.abspath(str(overrides["mix_path"]))
+    cfg.update(overrides)
+
+    mix_path, mix_txtf = cfg["mix_path"], cfg["mix_txtf"]
+    if not os.path.exists(mix_path):
+        raise FileNotFoundError(f"Mixture spectrum not found: {mix_path}")
+    if mix_txtf and not os.path.isfile(str(mix_txtf)):
+        raise FileNotFoundError(f"mix_txtf file not found: {mix_txtf}")
+
+    comp_paths = list(cfg["comp_path"] or [])
+    if not comp_paths:
+        raise ValueError("The input file lists no components")
+    if not cfg["lims"]:
+        raise ValueError("The input file defines no fit regions")
+    lims = normalize_windows(cfg["lims"])
+    bds = with_default_bounds(cfg["bds"])
+
+    n = len(comp_paths)
+    Hs = list(cfg["Hs"]) if cfg["Hs"] and len(cfg["Hs"]) == n else [1] * n
+    if Hs == [1] * n and cfg["Hs"] != Hs:
+        log("⚠ Hs not specified — defaulting to [1]*n. Mole fractions may be inaccurate.")
+    I0 = list(cfg["I0"]) if cfg["I0"] and len(cfg["I0"]) == n else [1.0] * n
+
+    if out_root is None:
+        out_root = cfg["out_root"]
+        if "mix_path" in overrides:
+            stem = os.path.splitext(os.path.basename(os.path.normpath(mix_path)))[0]
+            out_root = os.path.join(os.path.dirname(out_root), stem)
+
+    log(f"Loading mixture {mix_path}")
+    M = load_mixture(mix_path, cfg["mix_kws"], cfg["proc_opt"], mix_txtf)
+    acqus = dict(M.acqus)
+    N = M.r.shape[-1]
+
+    paths = resolve_calibrated_paths(comp_paths) if use_calibrated else comp_paths
+    comp_peaks, _components, comp_names = load_component_set(paths, acqus, N, Hs)
+    I = intensity_correction(M, acqus, Hs)
+
+    param, _clean, clean_Hs, c_idx, _peak_table = build_parameters(
+        M, comp_peaks, bds, lims, Hs, I0, comp_names, log=log
+    )
+    ctx = prepare_fit(M, param, lims)
+    result, history = minimize(
+        ctx, param, I, method=method, align=align, fit_kws=cfg["fit_kws"],
+        should_cancel=should_cancel, on_progress=on_progress, log=log,
+    )
+    results, _spectra, _total, _c_norm = assemble_results(
+        M, ctx, result, I, history, c_idx=c_idx, clean_Hs=clean_Hs, Hs=Hs,
+        comp_names=comp_names, lims=lims, mix_path=mix_path,
+    )
+
+    outputs: dict = {}
+    if save:
+        from app.core import exporter
+        outputs = exporter.save_all(out_root, results, **figure_options(cfg["plt_opt"]))
+
+    return {
+        "input": os.path.abspath(inp_path),
+        "mixture_path": mix_path,
+        "out_root": out_root,
+        "component_names": list(results["component_names"]),
+        "component_idx": [int(c) for c in results["component_idx"]],
+        "concentrations": [float(c) for c in results["concentrations"]],
+        "I": float(results["I"]),
+        "nfev": int(results["nfev"]),
+        "message": str(results["message"]),
+        "elapsed": time.perf_counter() - t0,
+        "outputs": outputs,
+    }
