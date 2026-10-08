@@ -17,7 +17,7 @@ A beautiful, modern desktop application for NMR mixture deconvolution using Indi
 - 📈 **Results panel** — concentration table, fitted spectrum, residuals
 - 💻 **Embedded terminal** with custom commands
 - 🪟 **Windows 11 Mica/Acrylic** glass effect support
-- ⚡ **Batch processing** — 100+ mixtures in parallel
+- ⚡ **Batch processing** — *planned*: the parallel `BatchProcessor` exists but is not yet wired into the GUI
 
 ## Tech Stack
 
@@ -54,23 +54,24 @@ Or double-click `SpectraFlow.bat` on Windows.
 spectraflow/
 ├── main.py                    # Entry point
 ├── SpectraFlow.bat            # Windows launcher
-├── requirements.txt           # Dependencies
+├── requirements.txt           # GUI dependencies (+ manual backend install notes)
+├── requirements-dev.txt       # pytest
 ├── app/
-│   ├── __init__.py
-│   ├── main_window.py         # Main window (sidebar + panels)
+│   ├── main_window.py         # Main window (sidebar + panels), wires panels to the engine
 │   ├── theme/
 │   │   ├── theme_manager.py   # Dark/light theme switching
-│   │   ├── dark.qss           # Modern dark theme (glassmorphism)
-│   │   └── light.qss          # Light theme
+│   │   ├── dark.qss / light.qss
+│   │   └── icons/             # SVG arrows for dropdowns / spinboxes
 │   ├── widgets/
 │   │   ├── sidebar.py         # Navigation sidebar
 │   │   ├── spectrum_viewer.py # PyQtGraph spectrum widget
 │   │   ├── parameter_slider.py# Label + slider + spinbox combo
 │   │   ├── file_browser.py    # File/folder browser
-│   │   └── terminal.py        # Embedded command terminal
+│   │   ├── terminal.py        # Embedded command terminal
+│   │   └── gradient_background.py / gradient_label.py
 │   ├── panels/
 │   │   ├── dashboard.py       # Welcome screen + stats
-│   │   ├── input_config.py    # Input file configuration
+│   │   ├── input_config.py    # Input file / component configuration
 │   │   ├── spectrum_panel.py  # Interactive spectrum viewer
 │   │   ├── region_selector.py # Spectral region picker
 │   │   ├── calibration_panel.py # Drift/intensity calibration
@@ -78,9 +79,12 @@ spectraflow/
 │   │   ├── fit_runner.py      # Fit execution + monitoring
 │   │   └── results_panel.py   # Results display + export
 │   └── core/
-│       ├── pipeline.py        # Workflow state management
-│       ├── workers.py         # Background thread workers
-│       └── batch_processor.py # Parallel batch processing
+│       ├── engine.py          # AnalysisEngine: wraps the pyihm workflow (load → fit → results)
+│       ├── exporter.py        # CSV / report / figure / convergence exports
+│       ├── workers.py         # FitWorker, SpectrumLoadWorker, FitCancelled
+│       ├── batch_processor.py # Parallel batch runner (not yet wired into the GUI)
+│       └── pipeline.py        # Workflow step tracker (currently unused)
+└── tests/                     # pytest suite, incl. test_e2e_fit.py (real, unmocked fit)
 ```
 
 ## License
