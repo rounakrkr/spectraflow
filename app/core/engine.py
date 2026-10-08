@@ -21,6 +21,7 @@ FIX LOG (v2):
 """
 
 import os
+import re
 import threading
 import traceback
 
@@ -37,6 +38,16 @@ import pyihm.input_reading as pyihm_input
 import pyihm.spectra_reading as pyihm_spectra
 import pyihm.gen_param as pyihm_gen
 import pyihm.fit_mixture as pyihm_fit
+
+
+# pyihm names each component's intensity parameter ``S<n>_I`` (see
+# pyihm.gen_param.main); every other fit parameter is u/s/k/b/U/o.
+_INTENSITY_RE = re.compile(r"S\d+_I")
+
+
+def is_intensity_param(name: str) -> bool:
+    """True for a component-intensity parameter (``S1_I``, ``S2_I``, ...)."""
+    return _INTENSITY_RE.fullmatch(name) is not None
 
 
 # ── Helper: resolve paths from a pyihm input file ──────────────────
@@ -526,7 +537,7 @@ class AnalysisEngine(QObject):
         acqus = dict(M.acqus)
         acqus["freq"] = M.freq
         N = M.r.shape[-1]
-        N_spectra = len([k for k in param if "I" in k])
+        N_spectra = len([k for k in param if is_intensity_param(k)])
         exp = np.copy(M.r)
 
         # Convert ppm limits to slices
@@ -646,7 +657,7 @@ class AnalysisEngine(QObject):
             # Get concentrations
             Hf = np.array([np.sum([p.k for p in peaks]) for peaks in opt_spectra_obj])
             concentrations = np.array([
-                f for key, f in popt.valuesdict().items() if "I" in key
+                f for key, f in popt.valuesdict().items() if is_intensity_param(key)
             ])
             # FIX #2: use clean_Hs (corrected for fit windows), not nominal Hs
             c_idx = self._state["c_idx"]
@@ -703,7 +714,7 @@ class AnalysisEngine(QObject):
     def _component_numbers(popt, n: int) -> list[int]:
         """1-based component numbers from the ``S<n>_I`` parameter names."""
         try:
-            return [int(k.split("_")[0].replace("S", "")) for k in popt if "I" in k]
+            return [int(k.split("_")[0].replace("S", "")) for k in popt if is_intensity_param(k)]
         except ValueError:
             return list(range(1, n + 1))
 

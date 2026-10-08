@@ -256,11 +256,11 @@ def test_run_fit_does_not_raise_unboundlocalerror(qapp, monkeypatch):
     M = SimpleNamespace(acqus={"x": 1}, freq=400.0,
                         r=np.ones(n), ppm=np.linspace(10, 0, n))
     param = lmfit.Parameters()
-    param.add("I_1", value=1.0)
+    param.add("S1_I", value=1.0)
 
     # Backend stubs: a single flat "spectrum" so the fit is trivially solvable.
     monkeypatch.setattr(eng.pyihm_fit, "calc_spectra",
-                        lambda p, ns, acqus, N: [np.full(n, p["I_1"].value)])
+                        lambda p, ns, acqus, N: [np.full(n, p["S1_I"].value)])
     monkeypatch.setattr(eng.pyihm_fit, "calc_spectra_obj",
                         lambda p, ns, acqus, N: [[SimpleNamespace(k=1.0)]])
     monkeypatch.setattr(eng.pyihm_fit, "pre_alignment",
