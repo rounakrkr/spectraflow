@@ -46,7 +46,22 @@ python main.py
 
 Run the tests with `pip install -r requirements-dev.txt` (after step 2) and `pytest`.
 
-Or double-click `SpectraFlow.bat` on Windows.
+Or double-click `SpectraFlow.bat` on Windows, or `SpectraFlow.command` on macOS.
+
+### macOS
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate     # Python 3.10-3.12
+pip install PySide6 pyqtgraph numpy lmfit threadpoolctl matplotlib
+pip install git+https://github.com/MetallerTM/klassez.git
+pip install --no-deps git+https://github.com/MetallerTM/pyihm.git
+python main.py                                          # or ./SpectraFlow.command
+```
+
+- If `SpectraFlow.command` won't open: `chmod +x SpectraFlow.command`, and if macOS
+  blocks it after download, `xattr -d com.apple.quarantine SpectraFlow.command`.
+- If pip tries to compile something, run `xcode-select --install` first.
+- The Windows-only Mica/Acrylic glass effect is skipped on macOS; the window is opaque.
 
 ## Project Structure
 
@@ -54,6 +69,7 @@ Or double-click `SpectraFlow.bat` on Windows.
 spectraflow/
 ├── main.py                    # Entry point
 ├── SpectraFlow.bat            # Windows launcher
+├── SpectraFlow.command        # macOS / Linux launcher
 ├── requirements.txt           # GUI dependencies (+ manual backend install notes)
 ├── requirements-dev.txt       # pytest
 ├── app/

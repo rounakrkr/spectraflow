@@ -11,12 +11,17 @@ import platform
 # Ensure PySide6 is used by pyqtgraph
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
 
+# Headless matplotlib for the whole process. The fit runs on QThreads and
+# klassez/pyihm import pyplot; on macOS the default "macosx" backend creates
+# NSWindows and aborts the app when that happens off the main thread.
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
 
 from app import __version__
 from app.main_window import MainWindow
+from app.platform_support import IS_MACOS, IS_WINDOWS, ui_font
 
 
 def enable_windows_backdrop(window, dark: bool = True) -> bool:
@@ -72,9 +77,13 @@ def enable_windows_backdrop(window, dark: bool = True) -> bool:
 def main():
     app = QApplication(sys.argv)
 
-    # Set default font
-    font = QFont("Segoe UI", 13)
-    app.setFont(font)
+    # Fusion renders the QSS themes identically on every OS; the native macOS
+    # style fights custom QSS (button heights, combo boxes, scroll bars).
+    if IS_MACOS:
+        app.setStyle("Fusion")
+
+    # Default font; the QSS themes size most widgets in px, this covers the rest.
+    app.setFont(ui_font(13))
 
     # App metadata
     app.setApplicationName("SpectraFlow")
@@ -88,7 +97,7 @@ def main():
     # setting it afterwards leaves the window surface opaque. GradientBackground
     # paints opaque unless a backdrop is actually active, so a failed DWM call
     # still renders correctly.
-    if platform.system() == "Windows":
+    if IS_WINDOWS:
         window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
     # Force native window handle creation (needed for DWM calls)
