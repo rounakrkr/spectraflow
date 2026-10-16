@@ -21,7 +21,7 @@ A beautiful, modern desktop application for NMR mixture deconvolution using Indi
 
 ## Tech Stack
 
-- **Python 3.10+** (professor can read/modify)
+- **Python 3.10+**
 - **PySide6 (Qt6)** — native C++ rendering, cross-platform
 - **PyQtGraph** — GPU-accelerated scientific plotting
 - **lmfit** — robust curve fitting
