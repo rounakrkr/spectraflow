@@ -8,7 +8,7 @@
 QWidget {
     background-color: transparent;
     color: #e4e8ee;
-    font-family: "Segoe UI", "Inter", "SF Pro Display", sans-serif;
+    font-family: "Segoe UI", "SF Pro Text", "Helvetica Neue", "Inter", sans-serif;
     font-size: 13px;
 }
 
@@ -232,7 +232,7 @@ QLineEdit#path_display {
     background-color: rgba(22, 27, 40, 160);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
-    font-family: "Cascadia Code", "Consolas", monospace;
+    font-family: "Cascadia Code", "SF Mono", "Menlo", "Consolas", monospace;
     font-size: 12px;
     padding: 8px 12px;
 }
@@ -265,7 +265,7 @@ QTextEdit#terminal_output {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
     padding: 12px;
-    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    font-family: "Cascadia Code", "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
     font-size: 12px;
 }
 
@@ -276,7 +276,7 @@ QLineEdit#terminal_input {
     border-top: none;
     border-radius: 0px 0px 12px 12px;
     padding: 10px 12px;
-    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    font-family: "Cascadia Code", "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
     font-size: 12px;
 }
 

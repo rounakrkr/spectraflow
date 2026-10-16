@@ -8,8 +8,9 @@ from PySide6.QtWidgets import (
     QTextEdit, QComboBox, QCheckBox,
 )
 from PySide6.QtCore import Signal, Qt, QTimer
-from PySide6.QtGui import QFont, QTextCursor, QColor
+from PySide6.QtGui import QTextCursor, QColor
 
+from ..platform_support import mono_font
 from ..widgets.spectrum_viewer import SpectrumViewer
 
 
@@ -138,7 +139,7 @@ class FitRunnerPanel(QWidget):
         lf_lay.addWidget(QLabel("Fit Log", objectName="section_title"))
         self._log = QTextEdit()
         self._log.setReadOnly(True)
-        self._log.setFont(QFont("Cascadia Code", 10))
+        self._log.setFont(mono_font(10))
         self._log.setObjectName("terminal_output")
         lf_lay.addWidget(self._log)
         splitter.addWidget(log_frame)

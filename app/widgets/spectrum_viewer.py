@@ -8,7 +8,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QFont
+
+from app.platform_support import ui_font
 
 
 class SpectrumViewer(QWidget):
@@ -51,7 +52,7 @@ class SpectrumViewer(QWidget):
             ax = self._pw.getAxis(axis_name)
             ax.setPen(pg.mkPen("#8892a0"))
             ax.setTextPen(pg.mkPen("#8892a0"))
-            ax.setStyle(tickFont=QFont("Segoe UI", 9))
+            ax.setStyle(tickFont=ui_font(9))
 
         # Crosshair
         pen_ch = pg.mkPen("#4fc3f7", width=1, style=Qt.PenStyle.DashLine)

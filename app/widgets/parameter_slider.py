@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 
+from app.platform_support import mod_key_name
+
 
 class ParameterSlider(QWidget):
     """A labelled slider synced to a spin-box for precise numeric input."""
@@ -76,7 +78,7 @@ class ParameterSlider(QWidget):
         self._spin.setAccelerated(True)          # hold ▲/▼ to speed up
         self._spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._spin.setToolTip(
-            f"▲/▼ or ↑/↓: ±{self._step:g}\nPgUp/PgDn or Ctrl+wheel: ±{self._step * 10:g}"
+            f"▲/▼ or ↑/↓: ±{self._step:g}\nPgUp/PgDn or {mod_key_name()}+wheel: ±{self._step * 10:g}"
         )
         self._spin.valueChanged.connect(self._spin_changed)
         lay.addWidget(self._spin)

@@ -10,7 +10,9 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QLineEdit, QHBoxLayout, QLabel,
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QTextCursor, QColor, QFont
+from PySide6.QtGui import QTextCursor, QColor
+
+from app.platform_support import mono_font
 
 
 class EmbeddedTerminal(QWidget):
@@ -34,7 +36,7 @@ class EmbeddedTerminal(QWidget):
         self._output = QTextEdit()
         self._output.setObjectName("terminal_output")
         self._output.setReadOnly(True)
-        self._output.setFont(QFont("Cascadia Code", 11))
+        self._output.setFont(mono_font(11))
         lay.addWidget(self._output)
 
         # Input row
